@@ -1,0 +1,1 @@
+main = "src/worker.ts", [assets] directory = "./dist" с run_worker_first = ["/api/*"]
