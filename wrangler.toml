@@ -1,9 +1,12 @@
 name = "forest-fortune-5x5"
-main = "src/worker.ts"
+main = "worker.js"
 compatibility_date = "2025-01-01"
 
-[assets]
-directory = "./dist"
-binding = "ASSETS"
-not_found_handling = "single-page-application"
-run_worker_first = "0a94772f6d0944a4bf18b5a0c8452835"
+[[rules]]
+type = "Text"
+globs = ["**/*.html"]
+fallthrough = true
+
+[[kv_namespaces]]
+binding = "KV_BINDING"
+id = "0a94772f6d0944a4bf18b5a0c8452835"
