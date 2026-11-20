@@ -1,6 +1,1278 @@
-git init
-git add .
-git commit -m "Initial Forest Fortune 5x5 with Cloudflare Functions and Telegram Stars"
-git branch -M main
-git remote add origin https://github.com/<ВАШ_ЛОГИН>/forest-fortune-5x5.git
-git push -u origin main
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>Forest Fortune 5x5 — Las Vegas Edition</title>
+  <meta name="description" content="Las Vegas Edition 5x5 cascading slot machine with 21 paylines, Wild multipliers, Free Spins, Fortune Wheel, and Risk Game." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;900&family=JetBrains+Mono:wght@600;800&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet" />
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    :root {
+      --bg: #060f09;
+      --cabinet: rgba(12, 29, 19, 0.96);
+      --panel: #08130c;
+      --btn: #122a1b;
+      --gold: #fbbf24;
+      --gold-light: #fde68a;
+      --emerald: #10b981;
+      --cyan: #22d3ee;
+      --rose: #f43f5e;
+      --font-display: 'Cinzel', Georgia, serif;
+      --font-sans: 'Plus Jakarta Sans', system-ui, sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; }
+    html, body {
+      margin: 0; padding: 0; min-height: 100dvh;
+      background: radial-gradient(circle at 50% 15%, #11351f 0%, #060f09 65%, #030805 100%);
+      color: #f0f4f8; font-family: var(--font-sans); overflow-x: hidden;
+    }
+    .font-display { font-family: var(--font-display); }
+    .font-num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+    .app-wrap {
+      position: relative; min-height: 100dvh; display: flex;
+      align-items: center; justify-content: center; padding: 10px 8px;
+    }
+    .fireflies { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 0; }
+    .firefly {
+      position: absolute; bottom: 28px; width: 6px; height: 6px; border-radius: 999px;
+      background: #fcd34d; box-shadow: 0 0 10px #fbbf24;
+      animation: floatFirefly 6s ease-in-out infinite;
+    }
+
+    .cabinet {
+      position: relative; z-index: 10; width: 100%; max-width: 520px;
+      background: var(--cabinet); border: 2px solid rgba(245, 158, 11, 0.48);
+      border-radius: 24px; padding: 14px; display: flex; flex-direction: column; gap: 10px;
+      box-shadow: 0 24px 70px rgba(0, 0, 0, 0.85); transition: border-color .3s, box-shadow .3s;
+    }
+    .cabinet.fs-mode {
+      border-color: #34d399; background: rgba(8, 38, 21, 0.96);
+      box-shadow: 0 0 45px rgba(16, 185, 129, 0.35);
+      animation: cabinetShake 0.45s ease-in-out infinite;
+    }
+
+    .top-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .icon-pill {
+      height: 38px; padding: 0 12px; border-radius: 12px; border: 1px solid rgba(251, 191, 36, 0.3);
+      background: #132b1c; color: #fde68a; font-weight: 700; font-size: 12px;
+      display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+    }
+    .title-main { font-family: var(--font-display); font-size: 17px; font-weight: 900; color: #fcd34d; margin: 0; text-align: center; }
+
+    .jackpot-box {
+      display: flex; align-items: center; justify-content: space-between; padding: 8px 14px;
+      border-radius: 14px; border: 1px solid rgba(251, 191, 36, 0.4);
+      background: linear-gradient(90deg, #1a1103, #2b1b05, #1a1103); transition: transform .2s;
+    }
+    .jackpot-box.bump { transform: scale(1.02); }
+    .jackpot-lbl { font-size: 11px; font-weight: 800; letter-spacing: .16em; color: rgba(252, 211, 77, 0.8); text-transform: uppercase; }
+    .jackpot-val { font-size: 20px; font-weight: 900; color: #fcd34d; text-shadow: 0 0 10px rgba(251, 191, 36, 0.45); }
+
+    .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .stat-card {
+      background: var(--panel); border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px; padding: 8px 12px; transition: border-color .2s, background .2s;
+    }
+    .stat-card.win-active { border-color: rgba(34, 211, 238, 0.65); background: rgba(8, 51, 68, 0.45); }
+    .stat-lbl { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: #94a3b8; }
+    .stat-val { font-size: 18px; font-weight: 800; color: #fde68a; margin-top: 2px; }
+    .stat-card.win-active .stat-val { color: #67e8f9; }
+
+    .fs-banner {
+      display: none; align-items: center; justify-content: space-between; padding: 8px 12px;
+      border-radius: 12px; border: 1px solid rgba(52, 211, 153, 0.6);
+      background: rgba(6, 78, 59, 0.55); font-size: 11px; font-weight: 800; color: #d1fae5;
+    }
+    .fs-banner.show { display: flex; }
+
+    .reels-frame {
+      position: relative; width: 100%; aspect-ratio: 1 / 1; overflow: hidden;
+      border-radius: 16px; border: 2px solid rgba(251, 191, 36, 0.5);
+      background: #07150c; padding: 6px; box-shadow: inset 0 0 24px rgba(0, 0, 0, 0.8);
+    }
+    .reels-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; width: 100%; height: 100%; }
+    .reel-col { position: relative; height: 100%; overflow: hidden; border-radius: 8px; background: #0b1f12; }
+    .reel-cells { display: grid; grid-template-rows: repeat(5, 1fr); gap: 4px; height: 100%; }
+    .reel-cells.stop-bounce { animation: reelStopBounce 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+    .reel-strip { display: flex; flex-direction: column; height: 240%; opacity: 0.85; filter: blur(0.4px); animation: reelSpinLoop 0.22s linear infinite; }
+    .reel-strip.turbo { animation-duration: 0.12s; }
+    .strip-item { height: 8.3333%; width: 100%; display: flex; align-items: center; justify-content: center; padding: 4px; }
+
+    .cell {
+      position: relative; display: flex; align-items: center; justify-content: center;
+      border-radius: 6px; padding: 3px; background: rgba(15, 41, 24, 0.78); transition: background .2s;
+    }
+    .cell.sticky { background: rgba(16, 185, 129, 0.22); box-shadow: inset 0 0 0 1.5px #6ee7b7; }
+    .cell.win {
+      z-index: 20; background: rgba(6, 182, 212, 0.26);
+      box-shadow: 0 0 16px rgba(34, 211, 238, 0.65), inset 0 0 0 2px #fcd34d;
+    }
+    .cell.win svg { animation: winSymbolPulse 0.48s ease-in-out infinite; }
+    .cell svg, .strip-item svg { width: 100%; height: 100%; display: block; }
+
+    .lines-svg {
+      position: absolute; inset: 6px; width: calc(100% - 12px); height: calc(100% - 12px);
+      pointer-events: none; z-index: 30;
+    }
+    .payline-path {
+      fill: none; stroke-width: 6; stroke-linecap: round; stroke-linejoin: round; opacity: 0.92;
+      stroke-dasharray: 1000; stroke-dashoffset: 1000;
+      animation: paylineDraw 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+
+    .presets { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+    .preset-btn {
+      height: 34px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1);
+      background: var(--btn); color: #cbd5e1; font-size: 12px; font-weight: 800; cursor: pointer;
+    }
+    .preset-btn.active { border-color: #fcd34d; background: #fbbf24; color: #451a03; }
+
+    .adjusters { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+    .adj-box {
+      background: var(--panel); border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px; padding: 7px; display: flex; flex-direction: column; justify-content: space-between;
+    }
+    .adj-lbl { text-align: center; font-size: 10px; font-weight: 700; text-transform: uppercase; color: #94a3b8; }
+    .adj-row { display: flex; align-items: center; justify-content: space-between; margin-top: 4px; }
+    .mini-btn {
+      width: 28px; height: 28px; border-radius: 8px; border: none; background: rgba(255, 255, 255, 0.12);
+      color: #fff; font-weight: 900; font-size: 15px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+    }
+    .mini-btn:disabled, button:disabled { opacity: 0.45; cursor: not-allowed; }
+    .adj-val { font-size: 12px; font-weight: 800; color: #fde68a; }
+    .total-val { text-align: center; font-size: 16px; font-weight: 900; color: #fcd34d; margin-top: 4px; }
+
+    .spin-row { display: grid; grid-template-columns: 3fr 6fr 3fr; gap: 8px; }
+    .side-btn {
+      height: 52px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.15);
+      background: var(--btn); color: #e2e8f0; font-size: 11px; font-weight: 800;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; cursor: pointer;
+    }
+    .side-btn.turbo-on { border-color: #fcd34d; background: rgba(251, 191, 36, 0.2); color: #fde68a; box-shadow: 0 0 15px rgba(251, 191, 36, 0.3); }
+    .spin-btn {
+      height: 52px; border-radius: 12px; border: 2px solid #fde68a;
+      background: linear-gradient(180deg, #fcd34d, #f59e0b); color: #451a03;
+      font-family: var(--font-display); font-size: 18px; font-weight: 900; letter-spacing: .06em;
+      box-shadow: 0 6px 20px rgba(245, 158, 11, 0.35); cursor: pointer;
+    }
+    .spin-btn.stopping { background: #be123c; color: #fff; border-color: #fcd34d; }
+    .spin-btn.auto-active { background: #155e75; color: #fff; border-color: #67e8f9; }
+    .spin-btn:active, .side-btn:active, .dock-btn:active { transform: scale(0.96); }
+
+    .maxbet-btn {
+      height: 38px; border-radius: 12px; border: 1px solid rgba(103, 232, 249, 0.4);
+      background: linear-gradient(90deg, rgba(6, 95, 70, 0.85), rgba(21, 94, 117, 0.85), rgba(6, 95, 70, 0.85));
+      color: #cffafe; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .12em; cursor: pointer;
+    }
+
+    .dock { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; padding-top: 2px; }
+    .dock-btn {
+      position: relative; height: 48px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.1);
+      background: #112619; color: #e2e8f0; font-size: 11px; font-weight: 700;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; cursor: pointer;
+    }
+    .dock-btn.risk-ready {
+      border-color: #fb7185; background: rgba(136, 19, 55, 0.55); color: #ffe4e6;
+      box-shadow: 0 0 16px rgba(244, 63, 94, 0.45); animation: pulseBtn 1.3s infinite;
+    }
+    .badge {
+      position: absolute; right: 5px; top: 4px; min-width: 16px; height: 16px; padding: 0 4px;
+      border-radius: 999px; background: #fbbf24; color: #451a03; font-size: 10px; font-weight: 900;
+      display: none; align-items: center; justify-content: center;
+    }
+    .badge.show { display: flex; }
+
+    .toast {
+      position: fixed; left: 50%; top: 14px; transform: translate(-50%, -18px); opacity: 0;
+      z-index: 90; pointer-events: none; padding: 10px 16px; border-radius: 12px;
+      font-size: 13px; font-weight: 700; border: 1px solid rgba(16, 185, 129, 0.7);
+      background: rgba(8, 34, 20, 0.95); color: #d1fae5; transition: transform .2s, opacity .2s;
+      max-width: 92vw; text-align: center; box-shadow: 0 12px 30px rgba(0, 0, 0, 0.7);
+    }
+    .toast.show { transform: translate(-50%, 0); opacity: 1; }
+    .toast.error { border-color: rgba(251, 113, 133, 0.75); background: rgba(76, 5, 25, 0.95); color: #ffe4e6; }
+    .toast.gold { border-color: rgba(251, 191, 36, 0.85); background: rgba(26, 20, 5, 0.96); color: #fde68a; }
+
+    .overlay {
+      position: fixed; inset: 0; z-index: 70; background: rgba(0, 0, 0, 0.82);
+      backdrop-filter: blur(5px); display: none; align-items: center; justify-content: center; padding: 16px;
+    }
+    .overlay.show { display: flex; }
+    .modal-card {
+      width: 100%; max-width: 390px; max-height: 86vh; overflow-y: auto;
+      border-radius: 20px; border: 1px solid rgba(251, 191, 36, 0.5); background: #0d1f14;
+      padding: 18px; color: #f1f5f9; box-shadow: 0 25px 60px rgba(0, 0, 0, 0.9);
+    }
+    .modal-card.wide { max-width: 500px; }
+    .modal-head {
+      display: flex; align-items: center; justify-content: space-between;
+      border-bottom: 1px solid rgba(251, 191, 36, 0.2); padding-bottom: 10px; margin-bottom: 14px;
+    }
+    .modal-title { font-family: var(--font-display); font-size: 17px; font-weight: 800; color: #fcd34d; margin: 0; }
+    .close-btn {
+      width: 34px; height: 34px; border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.12);
+      background: rgba(255, 255, 255, 0.06); color: #cbd5e1; font-size: 18px; cursor: pointer;
+    }
+    .btn-gold {
+      width: 100%; padding: 12px; border-radius: 12px; border: none;
+      background: linear-gradient(180deg, #fcd34d, #f59e0b); color: #451a03;
+      font-weight: 900; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; cursor: pointer;
+    }
+    .btn-ghost {
+      width: 100%; padding: 10px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.14);
+      background: rgba(255, 255, 255, 0.06); color: #e2e8f0; font-weight: 700; font-size: 13px; cursor: pointer;
+    }
+
+    .wheel-wrap { position: relative; width: 244px; height: 244px; margin: 0 auto 16px; }
+    .wheel-pointer {
+      position: absolute; top: -10px; left: 50%; transform: translateX(-50%); z-index: 20;
+      width: 0; height: 0; border-left: 13px solid transparent; border-right: 13px solid transparent;
+      border-top: 22px solid #ef4444; filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.8));
+    }
+    .wheel-disc {
+      position: relative; width: 100%; height: 100%; border-radius: 999px;
+      border: 4px solid #fbbf24; overflow: hidden; box-shadow: 0 0 25px rgba(251, 191, 36, 0.35);
+    }
+    .wheel-hub {
+      position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+      width: 54px; height: 54px; border-radius: 999px; border: 2px solid #fde68a;
+      background: radial-gradient(circle, #fbbf24, #92400e); display: flex; align-items: center;
+      justify-content: center; font-weight: 900; font-size: 18px; color: #451a03; box-shadow: 0 4px 12px rgba(0,0,0,0.7);
+    }
+
+    .risk-cards { display: flex; justify-content: center; gap: 18px; margin: 14px 0 18px; }
+    .card-box {
+      width: 78px; height: 108px; border-radius: 12px; background: #fff;
+      display: flex; align-items: center; justify-content: center; font-size: 24px; font-weight: 900;
+      border: 2px solid #fcd34d; color: #0f172a; box-shadow: 0 10px 20px rgba(0, 0, 0, 0.5);
+    }
+    .card-box.red { color: #dc2626; }
+    .card-box.blue { border-color: #67e8f9; }
+
+    .confetti-box { position: fixed; inset: 0; pointer-events: none; z-index: 80; overflow: hidden; }
+    .confetti-piece {
+      position: absolute; top: -16px; width: 8px; height: 12px; border-radius: 2px;
+      animation: confettiDrop 2.4s linear forwards;
+    }
+
+    @keyframes floatFirefly {
+      0%, 100% { transform: translate3d(0, 0, 0) scale(.7); opacity: 0; }
+      40%, 60% { opacity: .9; }
+      100% { transform: translate3d(18px, -160px, 0) scale(1.25); opacity: 0; }
+    }
+    @keyframes reelSpinLoop { 0% { transform: translate3d(0,0,0); } 100% { transform: translate3d(0,-50%,0); } }
+    @keyframes reelStopBounce { 0% { transform: translate3d(0,-18px,0); } 65% { transform: translate3d(0,5px,0); } 100% { transform: translate3d(0,0,0); } }
+    @keyframes winSymbolPulse { 0%, 100% { transform: scale(1) rotate(0); } 25% { transform: scale(1.08) rotate(-3deg); } 75% { transform: scale(1.08) rotate(3deg); } }
+    @keyframes cabinetShake {
+      0%,100% { transform: translate3d(0,0,0) rotate(0); }
+      20% { transform: translate3d(-3px,1.5px,0) rotate(-0.35deg); }
+      40% { transform: translate3d(4px,-2px,0) rotate(0.4deg); }
+      60% { transform: translate3d(-3px,-1px,0) rotate(-0.35deg); }
+      80% { transform: translate3d(2px,1.5px,0) rotate(0.25deg); }
+    }
+    @keyframes confettiDrop { 0% { transform: translate3d(0,-20px,0) rotate(0); opacity: 1; } 100% { transform: translate3d(0,100vh,0) rotate(680deg); opacity: 0; } }
+    @keyframes paylineDraw { from { stroke-dashoffset: 1000; } to { stroke-dashoffset: 0; } }
+    @keyframes pulseBtn { 0%,100% { transform: scale(1); } 50% { transform: scale(1.03); } }
+  </style>
+</head>
+<body>
+  <div class="fireflies">
+    <span class="firefly" style="left:12%;animation-delay:0s"></span>
+    <span class="firefly" style="left:28%;animation-delay:1.1s"></span>
+    <span class="firefly" style="left:48%;animation-delay:2.2s"></span>
+    <span class="firefly" style="left:72%;animation-delay:3.3s"></span>
+    <span class="firefly" style="left:86%;animation-delay:4.4s"></span>
+  </div>
+
+  <div id="toast" class="toast"></div>
+  <div id="confetti" class="confetti-box"></div>
+
+  <!-- Splash -->
+  <div id="splash" class="overlay show" style="background:rgba(6,15,9,0.96)">
+    <div class="modal-card" style="text-align:center;max-width:340px">
+      <div style="font-size:44px;margin-bottom:6px">🌲🎰🏆</div>
+      <h1 id="splashTitle" class="font-display" style="color:#fcd34d;margin:0;font-size:24px">Forest Fortune 5x5</h1>
+      <div style="font-size:11px;font-weight:800;letter-spacing:.2em;color:#6ee7b7;margin-top:4px;text-transform:uppercase">Las Vegas Edition</div>
+      <div style="height:8px;border-radius:999px;background:rgba(0,0,0,0.6);border:1px solid rgba(251,191,36,0.4);overflow:hidden;margin:16px 0">
+        <div id="splashBar" style="height:100%;width:0%;background:linear-gradient(90deg,#10b981,#fcd34d);transition:width .12s"></div>
+      </div>
+      <button id="btnEnter" class="btn-gold" type="button">ИГРАТЬ</button>
+    </div>
+  </div>
+
+  <!-- Big Win Overlay -->
+  <div id="bigWinOverlay" class="overlay">
+    <div style="text-align:center;max-width:300px;width:100%">
+      <div id="bwLabel" class="font-display" style="font-size:40px;font-weight:900;color:#fcd34d;text-shadow:0 0 24px rgba(251,191,36,0.7)">BIG WIN!</div>
+      <div id="bwSub" style="font-size:12px;font-weight:700;color:#6ee7b7;margin-top:6px"></div>
+      <div id="bwVal" class="font-num" style="font-size:44px;font-weight:900;color:#67e8f9;margin:14px 0 20px">+0</div>
+      <button id="btnShareStory" class="btn-gold" type="button" style="background:linear-gradient(90deg,#059669,#14b8a6);color:#fff;margin-bottom:10px">✨ Поделиться в сторис</button>
+      <button id="btnContinueBw" class="btn-ghost" type="button">Продолжить</button>
+    </div>
+  </div>
+
+  <!-- Modals -->
+  <div id="modalOverlay" class="overlay">
+    <div id="modalCard" class="modal-card">
+      <div class="modal-head">
+        <h2 id="modalTitle" class="modal-title"></h2>
+        <button id="modalClose" class="close-btn" type="button">✕</button>
+      </div>
+      <div id="modalBody"></div>
+    </div>
+  </div>
+
+  <main class="app-wrap">
+    <section id="cabinet" class="cabinet">
+      <header class="top-bar">
+        <button id="btnLang" class="icon-pill" type="button">🌐 <span id="langLabel">RU</span></button>
+        <h1 id="gameTitle" class="title-main">Forest Fortune 5x5</h1>
+        <button id="btnSound" class="icon-pill" type="button">🔊</button>
+      </header>
+
+      <div id="jackpotBox" class="jackpot-box">
+        <span id="lblJackpot" class="jackpot-lbl">ДЖЕКПОТ</span>
+        <span id="jackpotVal" class="font-num jackpot-val">500 000</span>
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div id="lblBalance" class="stat-lbl">БАЛАНС</div>
+          <div id="balanceVal" class="font-num stat-val">1 000</div>
+        </div>
+        <div id="winCard" class="stat-card">
+          <div id="lblWin" class="stat-lbl">ВЫИГРЫШ</div>
+          <div id="winVal" class="font-num stat-val">0</div>
+        </div>
+      </div>
+
+      <div id="fsBanner" class="fs-banner">
+        <span id="lblFsMode">✨ РЕЖИМ ФРИСПИНОВ · x2 · ЛИПКИЕ WILD</span>
+        <span id="fsCountVal" class="font-num" style="color:#fcd34d;font-size:13px">FS: 0</span>
+      </div>
+
+      <div class="reels-frame">
+        <div id="reelsGrid" class="reels-grid"></div>
+        <svg id="linesSvg" class="lines-svg" viewBox="0 0 500 500" preserveAspectRatio="none"></svg>
+      </div>
+
+      <div id="presets" class="presets"></div>
+
+      <div class="adjusters">
+        <div class="adj-box">
+          <div id="lblLines" class="adj-lbl">ЛИНИИ</div>
+          <div class="adj-row">
+            <button id="btnLinesMinus" class="mini-btn" type="button">−</button>
+            <span id="linesVal" class="font-num adj-val">15/21</span>
+            <button id="btnLinesPlus" class="mini-btn" type="button">+</button>
+          </div>
+        </div>
+        <div class="adj-box">
+          <div id="lblBet" class="adj-lbl">СТАВКА</div>
+          <div class="adj-row">
+            <button id="btnBetMinus" class="mini-btn" type="button">−</button>
+            <span id="betVal" class="font-num adj-val">1</span>
+            <button id="btnBetPlus" class="mini-btn" type="button">+</button>
+          </div>
+        </div>
+        <div class="adj-box" style="justify-content:center">
+          <div id="lblTotal" class="adj-lbl">ИТОГО</div>
+          <div id="totalBetVal" class="font-num total-val">15</div>
+        </div>
+      </div>
+
+      <div class="spin-row">
+        <button id="btnTurbo" class="side-btn" type="button"><span>⚡</span><span id="lblTurbo">ТУРБО</span></button>
+        <button id="btnSpin" class="spin-btn" type="button">КРУТИТЬ</button>
+        <button id="btnAuto" class="side-btn" type="button"><span>🔁</span><span id="lblAuto">АВТО</span></button>
+      </div>
+
+      <button id="btnMaxBet" class="maxbet-btn" type="button">МАКС. СТАВКА</button>
+
+      <nav class="dock">
+        <button id="btnWheel" class="dock-btn" type="button"><span>🎡</span><span id="lblWheel">Колесо</span></button>
+        <button id="btnShop" class="dock-btn" type="button"><span>🛍</span><span id="lblShop">Магазин</span></button>
+        <button id="btnRisk" class="dock-btn" type="button"><span>🔥</span><span id="lblRisk">Риск</span></button>
+        <button id="btnFriends" class="dock-btn" type="button"><span>👥</span><span id="lblFriends">Друзья</span></button>
+        <button id="btnTasks" class="dock-btn" type="button"><span>📋</span><span id="lblTasks">Задания</span><span id="tasksBadge" class="badge font-num">0</span></button>
+        <button id="btnTop" class="dock-btn" type="button"><span>🏆</span><span id="lblTop">Топ</span></button>
+        <button id="btnBonus" class="dock-btn" type="button"><span>🎁</span><span id="lblBonus">Бонус</span></button>
+        <button id="btnRules" class="dock-btn" type="button"><span>📖</span><span id="lblRules">Правила</span></button>
+      </nav>
+    </section>
+  </main>
+
+  <script>
+    const BOT_USERNAME = 'Forest_Fortune_Bot';
+    const REELS = 5, ROWS = 5, MAX_BET = 1000, MAX_CASCADES = 8;
+    const LINE_PRESETS = [1, 3, 5, 9, 15, 21];
+    const STORAGE_KEY = 'ff_vegas_state_v2';
+    const TASKS_KEY = 'ff_tasks_v2';
+    const WHEEL_DATE_KEY = 'ff_wheel_date_v2';
+
+    const BASE_WEIGHTS = {
+      'gem.png':10,'wild.png':8,'mushroom.png':12,'ufo.png':4,'weed_cross.png':4,'tech_face.png':6,
+      'man.png':6,'man2.png':8,'hutor.png':10,'firebird.png':12,'rabbit.png':15,'real_hedgehog.png':18,
+      'bear.png':20,'fox.png':22,'deer.png':22,'owl.png':25,'squirrel.png':28,'squirrel1.png':28,
+      'raccoon.png':30,'hedgehog.png':30,'pinecone.png':35,'acorn.png':35,'leaf.png':35,'coin.png':40
+    };
+    const PAYTABLE = {
+      'gem.png':[15,60,250],'wild.png':[30,100,500],'mushroom.png':[15,50,200],'ufo.png':[30,200,1500],
+      'weed_cross.png':[30,150,1000],'tech_face.png':[25,120,800],'man.png':[25,100,600],'man2.png':[20,100,500],
+      'hutor.png':[20,90,400],'firebird.png':[15,70,300],'rabbit.png':[15,60,250],'real_hedgehog.png':[10,40,200],
+      'bear.png':[10,30,150],'fox.png':[8,25,100],'deer.png':[8,25,100],'owl.png':[5,15,80],
+      'squirrel.png':[4,12,60],'squirrel1.png':[4,12,60],'raccoon.png':[3,10,50],'hedgehog.png':[3,10,50],
+      'pinecone.png':[2,8,40],'acorn.png':[2,8,40],'leaf.png':[2,8,40],'coin.png':[2,5,30]
+    };
+    const PAYLINES = [
+      [[0,0],[1,0],[2,0],[3,0],[4,0]],[[0,1],[1,1],[2,1],[3,1],[4,1]],[[0,2],[1,2],[2,2],[3,2],[4,2]],
+      [[0,3],[1,3],[2,3],[3,3],[4,3]],[[0,4],[1,4],[2,4],[3,4],[4,4]],[[0,0],[1,1],[2,2],[3,1],[4,0]],
+      [[0,4],[1,3],[2,2],[3,3],[4,4]],[[0,1],[1,2],[2,3],[3,2],[4,1]],[[0,3],[1,2],[2,1],[3,2],[4,3]],
+      [[0,0],[1,0],[2,1],[3,2],[4,2]],[[0,4],[1,4],[2,3],[3,2],[4,2]],[[0,2],[1,1],[2,0],[3,1],[4,2]],
+      [[0,2],[1,3],[2,4],[3,3],[4,2]],[[0,1],[1,0],[2,0],[3,0],[4,1]],[[0,3],[1,4],[2,4],[3,4],[4,3]],
+      [[0,0],[1,1],[2,1],[3,1],[4,0]],[[0,4],[1,3],[2,3],[3,3],[4,4]],[[0,1],[1,1],[2,2],[3,3],[4,3]],
+      [[0,3],[1,3],[2,2],[3,1],[4,1]],[[0,0],[1,2],[2,4],[3,2],[4,0]],[[0,4],[1,2],[2,0],[3,2],[4,4]]
+    ];
+    const LINE_COLORS = ['#ff3b30','#ff9500','#ffcc00','#34c759','#00c7be','#30b0ff','#5856d6','#af52de','#ff2d95','#ff6b6b','#ffd93d','#6bcf7f','#4ecdc4','#95e1d3','#a8e6cf','#c7ceea','#e2a4d1','#f6d365','#b5eaea','#e0aaff','#ffb4a2'];
+    const WHEEL_PRIZES = [
+      { type:'jackpot', val:50000, label:'JP', color:'#991b1b' },
+      { type:'fs', val:20, label:'20 FS', color:'#15803d' },
+      { type:'mult', val:50, label:'x50', color:'#a16207' },
+      { type:'mult', val:2, label:'x2', color:'#0f766e' },
+      { type:'mult', val:5, label:'x5', color:'#1d4ed8' },
+      { type:'fs', val:10, label:'10 FS', color:'#166534' },
+      { type:'mult', val:10, label:'x10', color:'#6b21a8' },
+      { type:'mult', val:3, label:'x3', color:'#047857' }
+    ];
+    const SHOP_PACKAGES = [
+      { id:'p100', coins:1000, stars:50, tagRu:'Стартовый', tagEn:'Starter' },
+      { id:'p500', coins:5000, stars:200, tagRu:'Популярный', tagEn:'Popular' },
+      { id:'p2000', coins:20000, stars:650, tagRu:'Выгода +30%', tagEn:'Best Value' },
+      { id:'p10000', coins:100000, stars:2500, tagRu:'Лас-Вегас VIP', tagEn:'Vegas VIP' }
+    ];
+    const SYM_NAMES = {
+      'gem.png':{ru:'Изумрудный Wild',en:'Emerald Wild'},'wild.png':{ru:'Кристалл Wild x2',en:'Crystal Wild x2'},
+      'mushroom.png':{ru:'Магический Гриб',en:'Magic Mushroom'},'ufo.png':{ru:'НЛО',en:'Forest UFO'},
+      'weed_cross.png':{ru:'Трилистник',en:'Golden Clover'},'tech_face.png':{ru:'Кибер-дух',en:'Cyber Spirit'},
+      'man.png':{ru:'Лесничий',en:'Ranger'},'man2.png':{ru:'Странник',en:'Wanderer'},
+      'hutor.png':{ru:'Хутор',en:'Forest Lodge'},'firebird.png':{ru:'Жар-птица',en:'Firebird'},
+      'rabbit.png':{ru:'Кролик',en:'Lucky Rabbit'},'real_hedgehog.png':{ru:'Лесной Ёжик',en:'Woodland Hedgehog'},
+      'bear.png':{ru:'Медведь',en:'Grizzly Bear'},'fox.png':{ru:'Лисица',en:'Red Fox'},
+      'deer.png':{ru:'Олень',en:'Stag'},'owl.png':{ru:'Сова',en:'Wise Owl'},
+      'squirrel.png':{ru:'Рыжая белка',en:'Red Squirrel'},'squirrel1.png':{ru:'Лесная белка',en:'Pine Squirrel'},
+      'raccoon.png':{ru:'Енот',en:'Raccoon'},'hedgehog.png':{ru:'Ёжик',en:'Hedgehog'},
+      'pinecone.png':{ru:'Шишка',en:'Pinecone'},'acorn.png':{ru:'Жёлудь',en:'Golden Acorn'},
+      'leaf.png':{ru:'Кленовый лист',en:'Maple Leaf'},'coin.png':{ru:'Монета',en:'Gold Coin'}
+    };
+    const TEXTS = {
+      ru: {
+        enter:'ИГРАТЬ', jackpot:'ДЖЕКПОТ', balance:'БАЛАНС', win:'ВЫИГРЫШ', lines:'ЛИНИИ', bet:'СТАВКА', total:'ИТОГО',
+        spin:'КРУТИТЬ', stop:'СТОП', auto:'АВТО', turbo:'ТУРБО', maxBet:'МАКС. СТАВКА',
+        fsMode:'✨ РЕЖИМ ФРИСПИНОВ · x2 · ЛИПКИЕ WILD', wheel:'Колесо', shop:'Магазин', risk:'Риск',
+        friends:'Друзья', tasks:'Задания', top:'Топ', bonus:'Бонус', rules:'Правила',
+        noCoins:'Недостаточно монет! Возьмите бонус или снизьте ставку.',
+        soundOn:'Звук включён', soundOff:'Звук выключен', turboOn:'Турбо включён', turboOff:'Турбо выключен',
+        autoTitle:'Автоспин', autoDesc:'Выберите количество вращений:', spinsUnit:'спинов', autoStarted:'Автоспин:', autoStopped:'Автоспин остановлен',
+        wheelTitle:'Колесо Фортуны', wheelSpin:'Крутить колесо', wheelSpinning:'Вращается...',
+        wheelInfo:'1 раз в сутки + бонус за 3+ гриба с барабанов', wheelEmpty:'Попытка на сегодня использована! Поймайте 3+ гриба.', wheelAvail:'Доступно',
+        shareStory:'Поделиться в сторис', cont:'Продолжить', storyCopied:'Текст скопирован!',
+        fsDone:'Серия фриспинов завершена!', fsStart:'Фриспины активированы!',
+        shopTitle:'Магазин монет', shopDesc:'Telegram Stars в приложении или демо-пополнение в браузере.', buy:'Купить',
+        riskTitle:'Риск-игра x2', riskDesc:'Угадайте, будет ли правая карта выше или ниже левой:', riskStake:'На кону',
+        riskHi:'Выше (x2)', riskLo:'Ниже (x2)', riskTake:'Забрать выигрыш', riskNeed:'Сначала выиграйте минимум 2x от ставки!',
+        riskWin:'Победа в риск-игре!', riskLose:'Карта не сыграла',
+        friendsTitle:'Пригласить друзей', friendsDesc:'Получайте +5 000 монет за каждого друга по вашей ссылке:', copy:'Копировать', share:'Поделиться', copied:'Ссылка скопирована!',
+        tasksTitle:'Ежедневные задания', tSpin:'Сделать 20 спинов', tWin:'Выиграть 5 раз', tWheel:'Крутить Колесо', claim:'Забрать', claimed:'Получено', inProg:'В процессе',
+        topTitle:'Таблица лидеров', you:'Вы', rulesTitle:'Правила и выплаты',
+        rulesDesc:'Соберите 3–5 символов слева направо по активной линии. Выигрышные символы запускают каскад!',
+        wildRule:'Кристаллы заменяют символы кроме гриба. Wild x2 даёт x2/x4/x8. Во фриспинах Wild становятся липкими!',
+        dailyOk:'Бонус +100 монет получен!', dailyWait:'Бонус уже получен сегодня!', scatterHit:'3+ Гриба! Получен спин Колеса Фортуны!'
+      },
+      en: {
+        enter:'PLAY NOW', jackpot:'JACKPOT', balance:'BALANCE', win:'WIN', lines:'LINES', bet:'BET', total:'TOTAL',
+        spin:'SPIN', stop:'STOP', auto:'AUTO', turbo:'TURBO', maxBet:'MAX BET',
+        fsMode:'✨ FREE SPINS · 2X · STICKY WILDS', wheel:'Wheel', shop:'Shop', risk:'Risk',
+        friends:'Friends', tasks:'Tasks', top:'Top', bonus:'Bonus', rules:'Rules',
+        noCoins:'Not enough coins! Claim Daily Bonus or lower your bet.',
+        soundOn:'Sound ON', soundOff:'Sound OFF', turboOn:'Turbo ON', turboOff:'Turbo OFF',
+        autoTitle:'Auto-Spin', autoDesc:'Choose automatic spins:', spinsUnit:'spins', autoStarted:'Auto-spin:', autoStopped:'Auto-spin stopped',
+        wheelTitle:'Wheel of Fortune', wheelSpin:'Spin Wheel', wheelSpinning:'Spinning...',
+        wheelInfo:'1 free/day + bonus spins from 3+ Mushrooms', wheelEmpty:'Daily spin used! Land 3+ Mushrooms for more.', wheelAvail:'Available',
+        shareStory:'Share to Story', cont:'Continue', storyCopied:'Caption copied!',
+        fsDone:'Free Spins complete!', fsStart:'Free Spins activated!',
+        shopTitle:'Coin Shop', shopDesc:'Pay with Telegram Stars or demo top-up in browser.', buy:'Get',
+        riskTitle:'Double or Nothing', riskDesc:'Guess if the right card is higher or lower:', riskStake:'At stake',
+        riskHi:'Higher (x2)', riskLo:'Lower (x2)', riskTake:'Collect Win', riskNeed:'Win at least 2x your total bet first!',
+        riskWin:'Risk doubled!', riskLose:'Card lost',
+        friendsTitle:'Invite Friends', friendsDesc:'Earn +5,000 coins for every friend who joins:', copy:'Copy', share:'Share', copied:'Link copied!',
+        tasksTitle:'Daily Tasks', tSpin:'Complete 20 spins', tWin:'Win 5 rounds', tWheel:'Spin the Wheel', claim:'Claim', claimed:'Claimed', inProg:'In progress',
+        topTitle:'Leaderboard', you:'You', rulesTitle:'Rules & Paytable',
+        rulesDesc:'Match 3–5 symbols left-to-right on active lines. Winning symbols trigger cascading tumbles!',
+        wildRule:'Wilds substitute any symbol except Mushroom. Wild x2 pays x2/x4/x8. Wilds stick in Free Spins!',
+        dailyOk:'Daily Bonus +100 coins!', dailyWait:'Already claimed today!', scatterHit:'3+ Mushrooms! Bonus Wheel spin awarded!'
+      }
+    };
+
+    function getSymbolSVG(id) {
+      switch (id) {
+        case 'wild.png': return '<svg viewBox="0 0 80 80"><polygon points="40,6 56,22 64,46 40,64 16,46 24,22" fill="#06b6d4" stroke="#ecfeff" stroke-width="2.5"/><polygon points="40,6 48,28 40,64 32,28" fill="#cffafe" opacity=".5"/><rect x="12" y="54" width="56" height="18" rx="5" fill="#083344" stroke="#ffd966" stroke-width="2"/><text x="40" y="67" text-anchor="middle" fill="#ffd966" font-size="11" font-weight="900">WILD x2</text></svg>';
+        case 'gem.png': return '<svg viewBox="0 0 80 80"><polygon points="24,14 56,14 68,30 40,66 12,30" fill="#10b981" stroke="#d1fae5" stroke-width="2.5"/><polygon points="24,14 56,14 48,30 32,30" fill="#a7f3d0" opacity=".6"/><rect x="17" y="54" width="46" height="17" rx="5" fill="#052e16" stroke="#ffd966" stroke-width="1.8"/><text x="40" y="66" text-anchor="middle" fill="#ffd966" font-size="10.5" font-weight="900">WILD</text></svg>';
+        case 'mushroom.png': return '<svg viewBox="0 0 80 80"><path d="M32,42 C32,42 30,62 33,66 L47,66 C50,62 48,42 48,42 Z" fill="#fef3c7" stroke="#d97706" stroke-width="2"/><path d="M12,42 C12,20 26,10 40,10 C54,10 68,20 68,42 Z" fill="#dc2626" stroke="#fca5a5" stroke-width="2"/><circle cx="28" cy="27" r="5" fill="#fff"/><circle cx="46" cy="21" r="4" fill="#fff"/><circle cx="53" cy="34" r="4" fill="#fff"/><rect x="13" y="56" width="54" height="16" rx="5" fill="#450a0a" stroke="#ffd966" stroke-width="1.8"/><text x="40" y="67.5" text-anchor="middle" fill="#ffd966" font-size="9.5" font-weight="900">SCATTER</text></svg>';
+        case 'ufo.png': return '<svg viewBox="0 0 80 80"><polygon points="24,48 56,48 66,72 14,72" fill="#22d3ee" opacity=".28"/><path d="M26,34 C26,20 54,20 54,34 Z" fill="#67e8f9" stroke="#ecfeff" stroke-width="2"/><ellipse cx="40" cy="38" rx="30" ry="11" fill="#475569" stroke="#ffd966" stroke-width="2.5"/><circle cx="24" cy="38" r="3" fill="#4ade80"/><circle cx="40" cy="40" r="3.5" fill="#ffd966"/><circle cx="56" cy="38" r="3" fill="#4ade80"/></svg>';
+        case 'weed_cross.png': return '<svg viewBox="0 0 80 80"><path d="M40,42 L40,70" stroke="#15803d" stroke-width="5" stroke-linecap="round"/><circle cx="40" cy="22" r="13" fill="#22c55e" stroke="#ffd966" stroke-width="2"/><circle cx="24" cy="38" r="13" fill="#16a34a" stroke="#ffd966" stroke-width="2"/><circle cx="56" cy="38" r="13" fill="#16a34a" stroke="#ffd966" stroke-width="2"/><circle cx="40" cy="37" r="6" fill="#ffd966"/></svg>';
+        case 'tech_face.png': return '<svg viewBox="0 0 80 80"><polygon points="40,10 64,24 60,56 40,70 20,56 16,24" fill="#1e293b" stroke="#38bdf8" stroke-width="2.5"/><rect x="23" y="30" width="34" height="12" rx="4" fill="#0ea5e9"/><circle cx="32" cy="36" r="2.5" fill="#fef08a"/><circle cx="48" cy="36" r="2.5" fill="#fef08a"/></svg>';
+        case 'man.png': return '<svg viewBox="0 0 80 80"><circle cx="40" cy="44" r="18" fill="#fed7aa" stroke="#9a3412" stroke-width="2"/><path d="M22,46 C22,62 58,62 58,46 L48,52 L32,52 Z" fill="#78350f"/><path d="M16,30 L64,30 L52,14 L28,14 Z" fill="#166534" stroke="#ffd966" stroke-width="2"/><circle cx="33" cy="40" r="2.5" fill="#1f2937"/><circle cx="47" cy="40" r="2.5" fill="#1f2937"/></svg>';
+        case 'man2.png': return '<svg viewBox="0 0 80 80"><path d="M18,64 C18,32 24,14 40,14 C56,14 62,32 62,64 Z" fill="#312e81" stroke="#c084fc" stroke-width="2"/><circle cx="40" cy="41" r="14" fill="#0f172a"/><circle cx="34" cy="40" r="3" fill="#facc15"/><circle cx="46" cy="40" r="3" fill="#facc15"/></svg>';
+        case 'hutor.png': return '<svg viewBox="0 0 80 80"><rect x="20" y="38" width="40" height="28" rx="3" fill="#92400e" stroke="#fde68a" stroke-width="2"/><polygon points="12,40 40,14 68,40" fill="#7f1d1d" stroke="#ffd966" stroke-width="2.5"/><rect x="34" y="48" width="12" height="18" rx="2" fill="#451a03"/><rect x="24" y="45" width="7" height="7" fill="#fde047"/><rect x="49" y="45" width="7" height="7" fill="#fde047"/></svg>';
+        case 'firebird.png': return '<svg viewBox="0 0 80 80"><path d="M18,54 C14,34 30,22 44,14 C48,26 62,22 64,34 C58,48 48,60 32,66 Z" fill="#f97316" stroke="#fde047" stroke-width="2"/><circle cx="46" cy="28" r="2.5" fill="#fff"/><polygon points="56,26 67,29 56,33" fill="#fde047"/></svg>';
+        case 'rabbit.png': return '<svg viewBox="0 0 80 80"><ellipse cx="31" cy="24" rx="6" ry="15" transform="rotate(-10 31 24)" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/><ellipse cx="49" cy="24" rx="6" ry="15" transform="rotate(10 49 24)" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/><circle cx="40" cy="48" r="18" fill="#f8fafc" stroke="#ffd966" stroke-width="2"/><circle cx="34" cy="45" r="2.5" fill="#1e293b"/><circle cx="46" cy="45" r="2.5" fill="#1e293b"/></svg>';
+        case 'real_hedgehog.png': return '<svg viewBox="0 0 80 80"><polygon points="28,18 34,10 40,18 46,10 52,18" fill="#ffd966"/><circle cx="40" cy="44" r="21" fill="#78350f" stroke="#d97706" stroke-width="2"/><ellipse cx="40" cy="48" rx="15" ry="13" fill="#fed7aa"/><circle cx="34" cy="44" r="2.5" fill="#111"/><circle cx="46" cy="44" r="2.5" fill="#111"/></svg>';
+        case 'bear.png': return '<svg viewBox="0 0 80 80"><circle cx="22" cy="24" r="8" fill="#7c2d12" stroke="#d97706" stroke-width="2"/><circle cx="58" cy="24" r="8" fill="#7c2d12" stroke="#d97706" stroke-width="2"/><circle cx="40" cy="44" r="22" fill="#9a3412" stroke="#fbbf24" stroke-width="2"/><ellipse cx="40" cy="50" rx="10" ry="8" fill="#fdba74"/><circle cx="32" cy="39" r="2.8" fill="#111"/><circle cx="48" cy="39" r="2.8" fill="#111"/></svg>';
+        case 'fox.png': return '<svg viewBox="0 0 80 80"><polygon points="18,16 32,28 18,38" fill="#ea580c"/><polygon points="62,16 48,28 62,38" fill="#ea580c"/><polygon points="16,32 40,22 64,32 40,66" fill="#f97316" stroke="#fde68a" stroke-width="2"/><circle cx="32" cy="38" r="2.6" fill="#111"/><circle cx="48" cy="38" r="2.6" fill="#111"/></svg>';
+        case 'deer.png': return '<svg viewBox="0 0 80 80"><path d="M28,28 L20,10 M52,28 L60,10" stroke="#fbbf24" stroke-width="3.5" stroke-linecap="round"/><ellipse cx="40" cy="46" rx="16" ry="20" fill="#b45309" stroke="#fde68a" stroke-width="2"/><circle cx="33" cy="42" r="2.5" fill="#111"/><circle cx="47" cy="42" r="2.5" fill="#111"/></svg>';
+        case 'owl.png': return '<svg viewBox="0 0 80 80"><ellipse cx="40" cy="44" rx="20" ry="22" fill="#78350f" stroke="#fbbf24" stroke-width="2"/><circle cx="31" cy="36" r="8" fill="#fef08a"/><circle cx="49" cy="36" r="8" fill="#fef08a"/><circle cx="31" cy="36" r="3.5" fill="#111"/><circle cx="49" cy="36" r="3.5" fill="#111"/><polygon points="36,44 44,44 40,52" fill="#f59e0b"/></svg>';
+        case 'squirrel.png': return '<svg viewBox="0 0 80 80"><path d="M52,60 C68,56 70,28 56,22 C48,18 46,32 50,44 Z" fill="#ea580c"/><circle cx="34" cy="44" r="15" fill="#f97316" stroke="#fde68a" stroke-width="2"/><circle cx="30" cy="41" r="2.5" fill="#111"/></svg>';
+        case 'squirrel1.png': return '<svg viewBox="0 0 80 80"><path d="M28,60 C12,56 10,28 24,22 C32,18 34,32 30,44 Z" fill="#92400e"/><circle cx="46" cy="44" r="15" fill="#b45309" stroke="#fde68a" stroke-width="2"/><circle cx="50" cy="41" r="2.5" fill="#111"/></svg>';
+        case 'raccoon.png': return '<svg viewBox="0 0 80 80"><circle cx="40" cy="44" r="20" fill="#94a3b8" stroke="#e2e8f0" stroke-width="2"/><ellipse cx="29" cy="42" rx="8" ry="6" fill="#1e293b"/><ellipse cx="51" cy="42" rx="8" ry="6" fill="#1e293b"/><circle cx="30" cy="42" r="2.5" fill="#fff"/><circle cx="50" cy="42" r="2.5" fill="#fff"/></svg>';
+        case 'hedgehog.png': return '<svg viewBox="0 0 80 80"><path d="M14,48 C14,24 30,18 46,20 C60,22 66,34 64,52 Z" fill="#57534e" stroke="#d6d3d1" stroke-width="2"/><ellipse cx="32" cy="48" rx="14" ry="11" fill="#fde68a"/><circle cx="28" cy="45" r="2.5" fill="#111"/></svg>';
+        case 'pinecone.png': return '<svg viewBox="0 0 80 80"><ellipse cx="40" cy="44" rx="17" ry="23" fill="#78350f" stroke="#f59e0b" stroke-width="2"/><path d="M25,36 Q40,46 55,36 M24,48 Q40,58 56,48" fill="none" stroke="#d97706" stroke-width="2.5"/></svg>';
+        case 'acorn.png': return '<svg viewBox="0 0 80 80"><path d="M22,36 C22,58 34,66 40,68 C46,66 58,58 58,36 Z" fill="#d97706" stroke="#fde68a" stroke-width="2"/><path d="M18,36 C18,22 62,22 62,36 Z" fill="#78350f" stroke="#fbbf24" stroke-width="2"/></svg>';
+        case 'leaf.png': return '<svg viewBox="0 0 80 80"><path d="M40,12 L47,26 L62,23 L54,37 L66,46 L50,51 L48,60 L40,56 L32,60 L30,51 L14,46 L26,37 L18,23 L33,26 Z" fill="#ea580c" stroke="#fde047" stroke-width="2"/></svg>';
+        default: return '<svg viewBox="0 0 80 80"><circle cx="40" cy="40" r="26" fill="#f59e0b" stroke="#fef9c3" stroke-width="2.5"/><text x="40" y="48" text-anchor="middle" fill="#78350f" font-size="24" font-weight="900">$</text></svg>';
+      }
+    }
+
+    const sfx = {
+      ctx: null, enabled: true,
+      unlock() {
+        if (!this.ctx) {
+          const C = window.AudioContext || window.webkitAudioContext;
+          if (C) this.ctx = new C();
+        }
+        if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
+      },
+      tone(freq, type, dur, vol = 0.2, delay = 0) {
+        if (!this.enabled) return;
+        this.unlock();
+        if (!this.ctx) return;
+        try {
+          const now = this.ctx.currentTime + delay;
+          const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+          o.type = type; o.frequency.setValueAtTime(freq, now);
+          g.gain.setValueAtTime(Math.max(0.001, vol), now);
+          g.gain.exponentialRampToValueAtTime(0.001, now + dur);
+          o.connect(g); g.connect(this.ctx.destination);
+          o.start(now); o.stop(now + dur + 0.02);
+        } catch {}
+      },
+      click() { this.tone(780, 'sine', 0.07, 0.14); },
+      spin() { this.tone(220, 'triangle', 0.18, 0.2); this.tone(330, 'triangle', 0.16, 0.15, 0.07); },
+      stop(r) { this.tone(360 + r * 45, 'triangle', 0.11, 0.22); },
+      win() { this.tone(523, 'sine', 0.18, 0.2, 0); this.tone(659, 'sine', 0.18, 0.2, 0.09); this.tone(784, 'sine', 0.25, 0.22, 0.18); },
+      bigWin() { [523, 659, 784, 1046, 1318].forEach((n, i) => this.tone(n, 'triangle', 0.28, 0.24, i * 0.09)); },
+      cascade() { this.tone(340, 'square', 0.08, 0.1, 0); this.tone(460, 'square', 0.08, 0.1, 0.05); },
+      lose() { this.tone(190, 'sawtooth', 0.18, 0.1, 0); this.tone(150, 'sawtooth', 0.22, 0.08, 0.1); },
+      tick(p) { this.tone(620 + (1 - p) * 260, 'triangle', 0.04, 0.14); }
+    };
+
+    const tg = window.Telegram && window.Telegram.WebApp;
+    const initData = (tg && tg.initData) || '';
+
+    let state = {
+      lang: 'ru', soundOn: true, turbo: false, balance: 1000, jackpot: 500000,
+      lines: 15, bet: 1, lastDailyDate: '', wheelLastDate: '', bonusWheelSpins: 0,
+      freeSpins: 0, isFreeSpin: false, fsTotalWin: 0, autoSpins: 0, isSpinning: false, stopReq: false,
+      stickyWilds: [], pendingRisk: 0, riskC1: null, riskC2: null, riskLock: false,
+      wheelAngle: 0, wheelSpinning: false, roundWin: 0, grid: [],
+      tasks: { spins: 0, wins: 0, wheel: 0, cSpin: false, cWin: false, cWheel: false, date: new Date().toDateString() }
+    };
+
+    try {
+      const s = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
+      if (s) Object.assign(state, { lang: s.lang || 'ru', soundOn: s.soundOn !== false, balance: typeof s.balance === 'number' ? s.balance : 1000, jackpot: typeof s.jackpot === 'number' ? s.jackpot : 500000, lines: s.lines || 15, bet: s.bet || 1, lastDailyDate: s.lastDailyDate || '' });
+      state.wheelLastDate = localStorage.getItem(WHEEL_DATE_KEY) || '';
+      const tk = JSON.parse(localStorage.getItem(TASKS_KEY) || 'null');
+      if (tk && tk.date === new Date().toDateString()) state.tasks = tk;
+    } catch {}
+
+    sfx.enabled = state.soundOn;
+    const $ = (id) => document.getElementById(id);
+    const fmt = (n) => Math.round(n).toLocaleString(state.lang === 'ru' ? 'ru-RU' : 'en-US');
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const save = () => {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ lang: state.lang, soundOn: state.soundOn, balance: state.balance, jackpot: state.jackpot, lines: state.lines, bet: state.bet, lastDailyDate: state.lastDailyDate }));
+        localStorage.setItem(TASKS_KEY, JSON.stringify(state.tasks));
+      } catch {}
+    };
+
+    let toastTimer = null, bwTimer = null, bwRaf = null, previewTimer = null, wheelRaf = null;
+    function notify(msg, type = 'info') {
+      const el = $('toast');
+      el.textContent = msg;
+      el.className = 'toast show' + (type === 'error' ? ' error' : type === 'gold' ? ' gold' : '');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => el.classList.remove('show'), 3000);
+    }
+    function haptic(kind) {
+      try {
+        if (tg && tg.HapticFeedback) {
+          if (kind === 'success' || kind === 'error') tg.HapticFeedback.notificationOccurred(kind);
+          else tg.HapticFeedback.impactOccurred(kind);
+        }
+      } catch {}
+    }
+    function spawnConfetti() {
+      const box = $('confetti');
+      const cols = ['#fbbf24', '#10b981', '#22d3ee', '#ef4444', '#f97316'];
+      box.innerHTML = '';
+      for (let i = 0; i < 32; i++) {
+        const s = document.createElement('span');
+        s.className = 'confetti-piece';
+        s.style.left = Math.random() * 100 + 'vw';
+        s.style.backgroundColor = cols[i % cols.length];
+        s.style.animationDelay = (Math.random() * 0.4).toFixed(2) + 's';
+        box.appendChild(s);
+      }
+      setTimeout(() => { box.innerHTML = ''; }, 2600);
+    }
+
+    function generatePool(totalBet) {
+      const pool = [], low = ['coin.png', 'leaf.png', 'acorn.png', 'pinecone.png'];
+      let mod = totalBet > 500 ? 0.4 : totalBet > 100 ? 0.7 : 1;
+      for (const [sym, base] of Object.entries(BASE_WEIGHTS)) {
+        const w = low.includes(sym) ? Math.floor(base * (totalBet > 100 ? 1.5 : 1.2)) : Math.max(1, Math.floor(base * mod));
+        for (let i = 0; i < w; i++) pool.push(sym);
+      }
+      return pool;
+    }
+    const pickSym = (pool) => pool[Math.floor(Math.random() * pool.length)] || 'coin.png';
+    function generateGrid(pool, stickies) {
+      const g = [];
+      for (let r = 0; r < REELS; r++) {
+        const col = [];
+        for (let c = 0; c < ROWS; c++) {
+          const sw = stickies.find((s) => s.r === r && s.c === c);
+          col.push(sw ? sw.type : pickSym(pool));
+        }
+        g.push(col);
+      }
+      return g;
+    }
+    function evaluateGrid(grid, linesCount, betPerLine, isFS) {
+      let totalWin = 0, scatterCount = 0;
+      const winCellMap = new Map(), winningLines = [];
+      for (let r = 0; r < REELS; r++) for (let c = 0; c < ROWS; c++) if (grid[r][c] === 'mushroom.png') scatterCount++;
+      PAYLINES.slice(0, linesCount).forEach((line, lineIndex) => {
+        const syms = line.map(([r, c]) => grid[r][c]);
+        if (syms[0] === 'mushroom.png') return;
+        let target = syms[0];
+        if (target === 'wild.png' || target === 'gem.png') {
+          for (let i = 1; i < REELS; i++) if (syms[i] !== 'wild.png' && syms[i] !== 'gem.png' && syms[i] !== 'mushroom.png') { target = syms[i]; break; }
+        }
+        let count = 0, wildX2 = 0;
+        for (let i = 0; i < REELS; i++) {
+          if (syms[i] === target || syms[i] === 'wild.png' || syms[i] === 'gem.png') {
+            count++; if (syms[i] === 'wild.png') wildX2++;
+          } else break;
+        }
+        if (count >= 3) {
+          const paySym = (target === 'wild.png' || target === 'gem.png') ? 'wild.png' : target;
+          let win = (PAYTABLE[paySym][count - 3] || 0) * betPerLine;
+          if (wildX2 === 1) win *= 2; else if (wildX2 === 2) win *= 4; else if (wildX2 >= 3) win *= 8;
+          if (isFS) win *= 2;
+          totalWin += win;
+          const pts = [];
+          for (let i = 0; i < count; i++) { const [r, c] = line[i]; winCellMap.set(r + '-' + c, { r, c }); pts.push([r, c]); }
+          winningLines.push({ lineIndex, color: LINE_COLORS[lineIndex % LINE_COLORS.length], points: pts });
+        }
+      });
+      return { totalWin, winCells: Array.from(winCellMap.values()), winningLines, scatterCount };
+    }
+    function applyCascade(grid, winCellsList, stickies, pool) {
+      const winSet = new Set(winCellsList.map((c) => c.r + '-' + c.c));
+      const stickyMap = new Map(stickies.map((s) => [s.r + '-' + s.c, s.type]));
+      const next = [];
+      for (let r = 0; r < REELS; r++) {
+        const surviving = [], nonStickyIdx = [];
+        for (let c = 0; c < ROWS; c++) {
+          const k = r + '-' + c;
+          if (!stickyMap.has(k)) { nonStickyIdx.push(c); if (!winSet.has(k)) surviving.push(grid[r][c]); }
+        }
+        const need = nonStickyIdx.length - surviving.length;
+        const filled = [...Array.from({ length: need }, () => pickSym(pool)), ...surviving];
+        const col = new Array(ROWS); let p = 0;
+        for (let c = 0; c < ROWS; c++) col[c] = stickyMap.get(r + '-' + c) || filled[p++];
+        next.push(col);
+      }
+      return next;
+    }
+
+    function renderLinesSvg(linesData) {
+      const svg = $('linesSvg');
+      svg.innerHTML = '';
+      linesData.forEach((l) => {
+        const pl = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+        pl.setAttribute('points', l.points.map(([r, c]) => (r * 100 + 50) + ',' + (c * 100 + 50)).join(' '));
+        pl.setAttribute('class', 'payline-path');
+        pl.setAttribute('stroke', l.color);
+        pl.style.filter = 'drop-shadow(0 0 6px ' + l.color + ')';
+        svg.appendChild(pl);
+      });
+    }
+
+    function renderGrid(winSet = new Set(), spinningCols = [false,false,false,false,false], stopCol = -1) {
+      const root = $('reelsGrid');
+      const pool = generatePool(state.lines * state.bet);
+      root.innerHTML = '';
+      for (let r = 0; r < REELS; r++) {
+        const colDiv = document.createElement('div');
+        colDiv.className = 'reel-col';
+        if (spinningCols[r]) {
+          const strip = document.createElement('div');
+          strip.className = 'reel-strip' + (state.turbo ? ' turbo' : '');
+          for (let i = 0; i < 12; i++) {
+            const d = document.createElement('div'); d.className = 'strip-item';
+            d.innerHTML = getSymbolSVG(pickSym(pool)); strip.appendChild(d);
+          }
+          colDiv.appendChild(strip);
+        } else {
+          const cells = document.createElement('div');
+          cells.className = 'reel-cells' + (stopCol === r ? ' stop-bounce' : '');
+          for (let c = 0; c < ROWS; c++) {
+            const cell = document.createElement('div');
+            const isWin = winSet.has(r + '-' + c);
+            const isSticky = state.stickyWilds.some((s) => s.r === r && s.c === c);
+            cell.className = 'cell' + (isWin ? ' win' : isSticky ? ' sticky' : '');
+            cell.innerHTML = getSymbolSVG(state.grid[r][c]);
+            cells.appendChild(cell);
+          }
+          colDiv.appendChild(cells);
+        }
+        root.appendChild(colDiv);
+      }
+    }
+
+    function renderPresets() {
+      const root = $('presets');
+      root.innerHTML = '';
+      LINE_PRESETS.forEach((p) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'preset-btn font-num' + (state.lines === p ? ' active' : '');
+        b.textContent = p + 'L';
+        b.disabled = state.isSpinning;
+        b.onclick = () => setLines(p);
+        root.appendChild(b);
+      });
+    }
+
+    function updateUI() {
+      const t = TEXTS[state.lang];
+      $('langLabel').textContent = state.lang.toUpperCase();
+      $('btnSound').textContent = state.soundOn ? '🔊' : '🔇';
+      $('btnEnter').textContent = t.enter;
+      $('lblJackpot').textContent = t.jackpot;
+      $('lblBalance').textContent = t.balance;
+      $('lblWin').textContent = t.win;
+      $('lblLines').textContent = t.lines;
+      $('lblBet').textContent = t.bet;
+      $('lblTotal').textContent = t.total;
+      $('lblTurbo').textContent = t.turbo;
+      $('lblAuto').textContent = t.auto;
+      $('btnMaxBet').textContent = t.maxBet;
+      $('lblFsMode').textContent = t.fsMode;
+      $('lblWheel').textContent = t.wheel;
+      $('lblShop').textContent = t.shop;
+      $('lblRisk').textContent = t.risk;
+      $('lblFriends').textContent = t.friends;
+      $('lblTasks').textContent = t.tasks;
+      $('lblTop').textContent = t.top;
+      $('lblBonus').textContent = t.bonus;
+      $('lblRules').textContent = t.rules;
+      $('btnShareStory').textContent = '✨ ' + t.shareStory;
+      $('btnContinueBw').textContent = t.cont;
+
+      $('jackpotVal').textContent = fmt(state.jackpot);
+      $('balanceVal').textContent = fmt(state.balance);
+      $('winVal').textContent = fmt(state.roundWin);
+      $('winCard').className = 'stat-card' + (state.roundWin > 0 ? ' win-active' : '');
+      $('linesVal').textContent = state.lines + '/21';
+      $('betVal').textContent = fmt(state.bet);
+      $('totalBetVal').textContent = fmt(state.lines * state.bet);
+
+      $('cabinet').className = 'cabinet' + (state.isFreeSpin || state.freeSpins > 0 ? ' fs-mode' : '');
+      $('fsBanner').className = 'fs-banner' + (state.isFreeSpin || state.freeSpins > 0 ? ' show' : '');
+      $('fsCountVal').textContent = 'FS: ' + (state.freeSpins + (state.isSpinning ? 0 : 1));
+
+      $('btnTurbo').className = 'side-btn' + (state.turbo ? ' turbo-on' : '');
+      const spinBtn = $('btnSpin');
+      if (state.isSpinning) { spinBtn.className = 'spin-btn stopping'; spinBtn.textContent = t.stop; }
+      else if (state.autoSpins > 0) { spinBtn.className = 'spin-btn auto-active'; spinBtn.textContent = t.stop + ' (' + state.autoSpins + ')'; }
+      else { spinBtn.className = 'spin-btn'; spinBtn.textContent = t.spin; }
+
+      $('btnRisk').className = 'dock-btn' + (state.pendingRisk > 0 ? ' risk-ready' : '');
+      const claimCount = (state.tasks.spins >= 20 && !state.tasks.cSpin ? 1 : 0) + (state.tasks.wins >= 5 && !state.tasks.cWin ? 1 : 0) + (state.tasks.wheel >= 1 && !state.tasks.cWheel ? 1 : 0);
+      $('tasksBadge').textContent = claimCount;
+      $('tasksBadge').className = 'badge font-num' + (claimCount > 0 ? ' show' : '');
+
+      $('btnLinesMinus').disabled = state.isSpinning || state.lines <= 1;
+      $('btnLinesPlus').disabled = state.isSpinning || state.lines >= 21;
+      $('btnBetMinus').disabled = state.isSpinning || state.bet <= 1;
+      $('btnBetPlus').disabled = state.isSpinning || state.bet >= MAX_BET;
+      $('btnAuto').disabled = state.isSpinning;
+      $('btnMaxBet').disabled = state.isSpinning;
+      renderPresets();
+      save();
+    }
+
+    let lastShareText = '';
+    function hideBigWin() {
+      cancelAnimationFrame(bwRaf); clearTimeout(bwTimer);
+      $('bigWinOverlay').classList.remove('show');
+    }
+    function triggerBigWin(amount, customLabel = '', customSub = '') {
+      hideBigWin();
+      const target = Math.max(0, Math.round(amount));
+      const label = customLabel || (target >= 5000 ? 'JACKPOT!' : target >= 1000 ? 'MEGA WIN!' : 'BIG WIN!');
+      lastShareText = label + ' +' + fmt(target) + ' — Forest Fortune 5x5!';
+      $('bwLabel').textContent = label;
+      $('bwSub').textContent = customSub;
+      $('bwVal').textContent = '+0';
+      $('bigWinOverlay').classList.add('show');
+      sfx.bigWin(); spawnConfetti();
+      const start = performance.now();
+      function step(now) {
+        const p = Math.min(1, (now - start) / 1000);
+        $('bwVal').textContent = '+' + fmt(target * (1 - Math.pow(1 - p, 3)));
+        if (p < 1) bwRaf = requestAnimationFrame(step);
+        else bwTimer = setTimeout(hideBigWin, 3800);
+      }
+      bwRaf = requestAnimationFrame(step);
+    }
+
+    async function syncServerSpin(betAmount, newBalance) {
+      if (!initData) return;
+      try {
+        const r = await fetch('/api/spin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ initData, newBalance, betAmount }) });
+        if (r.ok) {
+          const d = await r.json();
+          if (typeof d.jackpot === 'number') state.jackpot = d.jackpot;
+          if (d.jackpotWon && typeof d.newBalance === 'number') { state.balance = d.newBalance; triggerBigWin(d.winAmount || 50000); }
+          updateUI();
+        }
+      } catch {}
+    }
+
+    async function runSpinCycle(usingFS) {
+      if (state.isSpinning) return;
+      const t = TEXTS[state.lang], cost = state.lines * state.bet;
+      if (!usingFS && state.balance < cost) {
+        notify(t.noCoins, 'error'); haptic('error'); sfx.lose(); state.autoSpins = 0; updateUI(); return;
+      }
+      sfx.unlock();
+      state.isSpinning = true; state.stopReq = false; state.isFreeSpin = usingFS;
+      state.roundWin = 0; state.pendingRisk = 0;
+      if (!usingFS) {
+        state.stickyWilds = []; state.fsTotalWin = 0; state.balance -= cost;
+        state.jackpot += Math.max(1, Math.floor(cost * 0.01));
+        $('jackpotBox').classList.add('bump'); setTimeout(() => $('jackpotBox').classList.remove('bump'), 300);
+      }
+      state.tasks.spins++;
+      haptic('medium'); sfx.spin();
+      renderLinesSvg([]); updateUI();
+
+      let totalRoundWin = 0, triggeredScatter = false;
+      try {
+        const spinningCols = [true, true, true, true, true];
+        renderGrid(new Set(), spinningCols);
+        const pool = generatePool(cost);
+        const landed = generateGrid(pool, state.stickyWilds);
+        const dur = state.turbo ? 420 : 1000, t0 = performance.now();
+        while (!state.stopReq && performance.now() - t0 < dur) await sleep(50);
+
+        const stagger = state.stopReq ? 45 : state.turbo ? 60 : 165;
+        state.grid = landed;
+        for (let r = 0; r < REELS; r++) {
+          spinningCols[r] = false; renderGrid(new Set(), spinningCols, r);
+          sfx.stop(r); haptic('light');
+          if (r < REELS - 1) await sleep(stagger);
+        }
+        await sleep(160);
+
+        let step = 0;
+        while (step < MAX_CASCADES) {
+          const ev = evaluateGrid(state.grid, state.lines, state.bet, usingFS);
+          if (step === 0 && ev.scatterCount >= 3) triggeredScatter = true;
+          if (ev.totalWin <= 0) break;
+
+          totalRoundWin += ev.totalWin;
+          if (usingFS) state.fsTotalWin += ev.totalWin;
+          state.balance += ev.totalWin; state.roundWin = totalRoundWin;
+          if (usingFS) {
+            for (let r = 0; r < REELS; r++) for (let c = 0; c < ROWS; c++) {
+              const sym = state.grid[r][c];
+              if ((sym === 'wild.png' || sym === 'gem.png') && !state.stickyWilds.some((s) => s.r === r && s.c === c)) {
+                state.stickyWilds.push({ r, c, type: sym });
+              }
+            }
+          }
+          renderGrid(new Set(ev.winCells.map((c) => c.r + '-' + c.c)));
+          renderLinesSvg(ev.winningLines);
+          updateUI(); sfx.win(); haptic('success');
+
+          await sleep(state.turbo ? 400 : 900);
+          sfx.cascade();
+          state.grid = applyCascade(state.grid, ev.winCells, state.stickyWilds, pool);
+          renderGrid(); renderLinesSvg([]);
+          step++;
+          await sleep(state.turbo ? 180 : 300);
+        }
+
+        if (totalRoundWin > 0) {
+          state.tasks.wins++;
+          if (!usingFS) {
+            if (totalRoundWin >= cost * 10) triggerBigWin(totalRoundWin); else spawnConfetti();
+            if (totalRoundWin >= cost * 2) state.pendingRisk = totalRoundWin;
+          } else spawnConfetti();
+        } else sfx.lose();
+
+        syncServerSpin(usingFS ? 0 : cost, state.balance);
+      } finally {
+        state.isSpinning = false;
+        updateUI();
+      }
+
+      if (triggeredScatter) {
+        state.bonusWheelSpins++; updateUI();
+        notify(t.scatterHit, 'gold'); haptic('heavy');
+        if (!usingFS) { state.autoSpins = 0; updateUI(); setTimeout(openWheelModal, 650); return; }
+      }
+      if (state.freeSpins > 0) {
+        state.freeSpins--; updateUI();
+        setTimeout(() => runSpinCycle(true), state.turbo ? 550 : 1000);
+      } else {
+        if (usingFS && state.fsTotalWin > 0) { triggerBigWin(state.fsTotalWin, 'FREE SPINS WIN!', t.fsDone); state.fsTotalWin = 0; }
+        state.isFreeSpin = false; state.stickyWilds = []; updateUI();
+        if (state.autoSpins > 0) { state.autoSpins--; updateUI(); setTimeout(() => runSpinCycle(false), state.turbo ? 450 : 850); }
+      }
+    }
+
+    function setLines(v) {
+      if (state.isSpinning) return;
+      state.lines = Math.max(1, Math.min(21, v));
+      sfx.click(); haptic('light'); updateUI();
+      renderLinesSvg(PAYLINES.slice(0, state.lines).map((line, i) => ({ color: LINE_COLORS[i % LINE_COLORS.length], points: line })));
+      clearTimeout(previewTimer);
+      previewTimer = setTimeout(() => { if (!state.isSpinning) renderLinesSvg([]); }, 1200);
+    }
+
+    function openModal(title, html, wide = false) {
+      $('modalTitle').textContent = title;
+      $('modalBody').innerHTML = html;
+      $('modalCard').className = 'modal-card' + (wide ? ' wide' : '');
+      $('modalOverlay').classList.add('show');
+    }
+    function closeModal() { if (!state.wheelSpinning) $('modalOverlay').classList.remove('show'); }
+
+    function openAutoModal() {
+      const t = TEXTS[state.lang];
+      openModal(t.autoTitle, `<p style="font-size:13px;color:#cbd5e1;margin:0 0 14px">${t.autoDesc}</p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+          ${[10,25,50,100].map(n => `<button class="btn-gold" style="background:#047857;color:#fff" onclick="startAuto(${n})">${n} ${t.spinsUnit}</button>`).join('')}
+        </div><button class="btn-ghost" onclick="closeModal()">✕</button>`);
+    }
+    window.startAuto = (n) => { closeModal(); state.autoSpins = n - 1; notify(TEXTS[state.lang].autoStarted + ' ' + n); updateUI(); runSpinCycle(state.freeSpins > 0); };
+
+    function openWheelModal() {
+      const t = TEXTS[state.lang], today = new Date().toDateString();
+      const avail = (state.wheelLastDate !== today ? 1 : 0) + state.bonusWheelSpins;
+      const wedge = 360 / WHEEL_PRIZES.length;
+      const wedgesSvg = WHEEL_PRIZES.map((p, i) => {
+        const s = i * wedge - 90, e = s + wedge, sr = s * Math.PI / 180, er = e * Math.PI / 180;
+        const x1 = 100 + 100 * Math.cos(sr), y1 = 100 + 100 * Math.sin(sr), x2 = 100 + 100 * Math.cos(er), y2 = 100 + 100 * Math.sin(er);
+        const mid = s + wedge / 2, mr = mid * Math.PI / 180, tx = 100 + 66 * Math.cos(mr), ty = 100 + 66 * Math.sin(mr);
+        return `<path d="M100,100 L${x1},${y1} A100,100 0 0,1 ${x2},${y2} Z" fill="${p.color}" stroke="#fbbf24" stroke-width="1.5"/><text x="${tx}" y="${ty}" fill="#fef3c7" font-size="12" font-weight="900" text-anchor="middle" dominant-baseline="middle" transform="rotate(${mid+90},${tx},${ty})">${p.label}</text>`;
+      }).join('');
+      openModal(t.wheelTitle, `<p style="text-align:center;font-size:12px;color:#fde68a;margin:0 0 4px">${t.wheelInfo}</p>
+        <p class="font-num" style="text-align:center;font-size:12px;font-weight:800;color:#6ee7b7;margin:0 0 14px">${t.wheelAvail}: ${avail}</p>
+        <div class="wheel-wrap"><div class="wheel-pointer"></div>
+          <div id="wheelDisc" class="wheel-disc" style="transform:rotate(${state.wheelAngle.toFixed(2)}deg)">
+            <svg viewBox="0 0 200 200" style="width:100%;height:100%">${wedgesSvg}</svg>
+            <div class="wheel-hub">★</div>
+          </div>
+        </div>
+        <button id="btnSpinWheel" class="btn-gold" ${avail === 0 ? 'style="opacity:.55"' : ''} onclick="spinWheel()">${t.wheelSpin}</button>`);
+    }
+    window.spinWheel = () => {
+      if (state.wheelSpinning) return;
+      const t = TEXTS[state.lang], today = new Date().toDateString();
+      const avail = (state.wheelLastDate !== today ? 1 : 0) + state.bonusWheelSpins;
+      if (avail <= 0) { notify(t.wheelEmpty, 'error'); sfx.lose(); return; }
+      sfx.unlock();
+      if (state.bonusWheelSpins > 0) state.bonusWheelSpins--; else { state.wheelLastDate = today; localStorage.setItem(WHEEL_DATE_KEY, today); }
+      state.wheelSpinning = true; state.tasks.wheel++; updateUI();
+      $('btnSpinWheel').disabled = true; $('btnSpinWheel').textContent = t.wheelSpinning;
+      sfx.spin(); haptic('medium');
+
+      const winIdx = Math.random() < 0.0005 ? 0 : [1,2,3,4,5,6,7][Math.floor(Math.random() * 7)];
+      const wedge = 360 / WHEEL_PRIZES.length, center = winIdx * wedge + wedge / 2;
+      const startA = state.wheelAngle, norm = ((startA % 360) + 360) % 360, mod = (360 - center) % 360;
+      let delta = (mod - norm + 360) % 360; if (delta < 15) delta += 360;
+      const targetA = startA + 360 * 7 + delta, totalD = targetA - startA, t0 = performance.now();
+      let lastSec = Math.floor(startA / wedge);
+
+      function step(now) {
+        const p = Math.min(1, (now - t0) / 4600);
+        const e = p < 0.16 ? 0.12 * (p / 0.16) * (p / 0.16) : 0.12 + 0.88 * (1 - Math.pow(1 - (p - 0.16) / 0.84, 3.2)) + Math.sin(((p - 0.16) / 0.84) * Math.PI * 3) * (1 - (p - 0.16) / 0.84) * 0.012;
+        const curA = startA + totalD * e;
+        state.wheelAngle = curA;
+        const disc = $('wheelDisc'); if (disc) disc.style.transform = 'rotate(' + curA.toFixed(2) + 'deg)';
+        const sec = Math.floor(curA / wedge);
+        if (sec !== lastSec) { lastSec = sec; sfx.tick(p); }
+        if (p < 1) wheelRaf = requestAnimationFrame(step);
+        else {
+          state.wheelAngle = targetA; state.wheelSpinning = false;
+          const prize = WHEEL_PRIZES[winIdx];
+          sfx.win(); spawnConfetti(); closeModal();
+          if (prize.type === 'mult') {
+            const winAmt = state.lines * state.bet * prize.val;
+            state.balance += winAmt; notify(t.wheelTitle + ': ' + prize.label + ' (+' + fmt(winAmt) + ')', 'gold');
+            if (prize.val >= 10) triggerBigWin(winAmt, 'WHEEL ' + prize.label + '!');
+          } else if (prize.type === 'fs') {
+            state.fsTotalWin = 0; state.freeSpins += prize.val - 1; state.isFreeSpin = true;
+            triggerBigWin(prize.val, '+' + prize.val + ' FREE SPINS', t.fsStart);
+            setTimeout(() => { if (!state.isSpinning) { hideBigWin(); runSpinCycle(true); } }, 1800);
+          } else {
+            const jp = state.jackpot; state.balance += jp; state.jackpot = 50000;
+            triggerBigWin(jp, 'JACKPOT!');
+          }
+          updateUI(); syncServerSpin(0, state.balance);
+        }
+      }
+      wheelRaf = requestAnimationFrame(step);
+    };
+
+    const drawCard = () => {
+      const suits = ['♠','♥','♦','♣'], ranks = ['2','3','4','5','6','7','8','9','10','J','Q','K','A'];
+      const r = Math.floor(Math.random() * ranks.length), s = suits[Math.floor(Math.random() * 4)];
+      return { rank: r + 2, str: ranks[r] + s, red: s === '♥' || s === '♦' };
+    };
+    function openRiskModal() {
+      const t = TEXTS[state.lang];
+      if (state.pendingRisk <= 0) { notify(t.riskNeed, 'error'); return; }
+      state.riskC1 = drawCard(); state.riskC2 = null; state.riskLock = false;
+      renderRiskModal();
+    }
+    function renderRiskModal() {
+      const t = TEXTS[state.lang];
+      openModal(t.riskTitle, `<p style="text-align:center;font-size:13px;color:#cbd5e1;margin:0 0 6px">${t.riskDesc}</p>
+        <div class="font-num" style="text-align:center;font-size:18px;font-weight:900;color:#fcd34d">${t.riskStake}: ${fmt(state.pendingRisk)}</div>
+        <div class="risk-cards">
+          <div class="card-box${state.riskC1.red ? ' red' : ''}">${state.riskC1.str}</div>
+          <div class="card-box blue${state.riskC2 && state.riskC2.red ? ' red' : ''}">${state.riskC2 ? state.riskC2.str : '?'}</div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+          <button class="btn-gold" style="background:#059669;color:#fff" ${state.riskLock ? 'disabled' : ''} onclick="playRisk(true)">${t.riskHi}</button>
+          <button class="btn-gold" style="background:#e11d48;color:#fff" ${state.riskLock ? 'disabled' : ''} onclick="playRisk(false)">${t.riskLo}</button>
+        </div>
+        <button class="btn-ghost" style="border-color:rgba(251,191,36,0.4);color:#fde68a" onclick="takeRisk()">${t.riskTake}</button>`);
+    }
+    window.playRisk = (hi) => {
+      if (state.riskLock || state.pendingRisk <= 0) return;
+      state.riskLock = true; sfx.click();
+      state.riskC2 = drawCard(); renderRiskModal();
+      const won = hi ? state.riskC2.rank > state.riskC1.rank : state.riskC2.rank < state.riskC1.rank;
+      setTimeout(() => {
+        const t = TEXTS[state.lang];
+        if (won) {
+          state.balance += state.pendingRisk; state.pendingRisk *= 2; state.roundWin = state.pendingRisk;
+          sfx.win(); haptic('success'); spawnConfetti(); notify(t.riskWin, 'gold'); updateUI();
+          setTimeout(() => { state.riskC1 = drawCard(); state.riskC2 = null; state.riskLock = false; renderRiskModal(); }, 850);
+        } else {
+          state.balance = Math.max(0, state.balance - state.pendingRisk); state.pendingRisk = 0; state.roundWin = 0;
+          sfx.lose(); haptic('error'); notify(t.riskLose, 'error'); updateUI(); closeModal();
+        }
+        syncServerSpin(0, state.balance);
+      }, 750);
+    };
+    window.takeRisk = () => { state.pendingRisk = 0; closeModal(); updateUI(); sfx.click(); };
+
+    function openShopModal() {
+      const t = TEXTS[state.lang];
+      openModal(t.shopTitle, `<p style="font-size:12px;color:#cbd5e1;margin:0 0 12px">${t.shopDesc}</p>
+        <div style="display:flex;flex-direction:column;gap:10px">
+          ${SHOP_PACKAGES.map(p => `<div style="display:flex;align-items:center;justify-content:space-between;background:#122a1b;border:1px solid rgba(251,191,36,0.25);border-radius:12px;padding:10px 12px">
+            <div><div class="font-num" style="font-weight:900;color:#fde68a">🪙 +${fmt(p.coins)}</div>
+            <div style="font-size:11px;color:#6ee7b7">${state.lang === 'ru' ? p.tagRu : p.tagEn} · ${p.stars} Stars</div></div>
+            <button class="btn-gold" style="width:auto;padding:8px 14px;background:#059669;color:#fff" onclick="buyPkg('${p.id}')">${t.buy}</button>
+          </div>`).join('')}
+        </div>`);
+    }
+    window.buyPkg = async (id) => {
+      const pkg = SHOP_PACKAGES.find((p) => p.id === id); if (!pkg) return;
+      if (initData && tg && tg.openInvoice) {
+        try {
+          const r = await fetch('/api/invoice', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ initData, packageId: id }) });
+          const d = await r.json();
+          if (d.invoiceLink) {
+            tg.openInvoice(d.invoiceLink, (st) => { if (st === 'paid') { state.balance += pkg.coins; updateUI(); spawnConfetti(); notify('+' + fmt(pkg.coins), 'gold'); } });
+            return;
+          }
+        } catch {}
+      }
+      state.balance += pkg.coins; sfx.win(); spawnConfetti(); updateUI(); notify('+' + fmt(pkg.coins), 'gold');
+    };
+
+    function openTasksModal() {
+      const t = TEXTS[state.lang];
+      const list = [
+        { k:'spin', title:t.tSpin, prog:Math.min(state.tasks.spins,20), target:20, rew:500, cl:state.tasks.cSpin },
+        { k:'win', title:t.tWin, prog:Math.min(state.tasks.wins,5), target:5, rew:1000, cl:state.tasks.cWin },
+        { k:'wheel', title:t.tWheel, prog:Math.min(state.tasks.wheel,1), target:1, rew:2000, cl:state.tasks.cWheel }
+      ];
+      openModal(t.tasksTitle, `<div style="display:flex;flex-direction:column;gap:10px">
+        ${list.map(x => {
+          const ready = x.prog >= x.target && !x.cl, pct = Math.round((x.prog / x.target) * 100);
+          return `<div style="background:#122a1b;border:1px solid rgba(251,191,36,0.2);border-radius:12px;padding:12px">
+            <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:800;margin-bottom:6px"><span>${x.title}</span><span class="font-num" style="color:#fcd34d">+${fmt(x.rew)}</span></div>
+            <div style="height:6px;background:rgba(0,0,0,0.5);border-radius:999px;overflow:hidden;margin-bottom:8px"><div style="height:100%;width:${pct}%;background:linear-gradient(90deg,#10b981,#fcd34d)"></div></div>
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <span class="font-num" style="font-size:11px;color:#94a3b8">${x.prog}/${x.target}</span>
+              <button class="btn-gold" style="width:auto;padding:6px 12px;font-size:11px;${ready ? '' : 'background:rgba(255,255,255,0.1);color:#94a3b8'}" ${ready ? '' : 'disabled'} onclick="claimTask('${x.k}')">${x.cl ? t.claimed : ready ? t.claim : t.inProg}</button>
+            </div></div>`;
+        }).join('')}</div>`);
+    }
+    window.claimTask = (k) => {
+      let rew = 0;
+      if (k === 'spin' && state.tasks.spins >= 20 && !state.tasks.cSpin) { state.tasks.cSpin = true; rew = 500; }
+      if (k === 'win' && state.tasks.wins >= 5 && !state.tasks.cWin) { state.tasks.cWin = true; rew = 1000; }
+      if (k === 'wheel' && state.tasks.wheel >= 1 && !state.tasks.cWheel) { state.tasks.cWheel = true; rew = 2000; }
+      if (rew > 0) { state.balance += rew; sfx.win(); spawnConfetti(); notify('+' + fmt(rew), 'gold'); updateUI(); syncServerSpin(0, state.balance); openTasksModal(); }
+    };
+
+    async function openTopModal() {
+      const t = TEXTS[state.lang];
+      openModal(t.topTitle, '<div style="text-align:center;padding:20px;color:#94a3b8">...</div>');
+      let rows = [];
+      try { const r = await fetch('/api/leaderboard'); if (r.ok) rows = await r.json(); } catch {}
+      if (!Array.isArray(rows) || !rows.length) {
+        const me = (tg && tg.initDataUnsafe && tg.initDataUnsafe.user && (tg.initDataUnsafe.user.first_name || tg.initDataUnsafe.user.username)) || t.you;
+        rows = [{ name:'VegasFox', balance:148500 }, { name:'LuckyHedgehog', balance:64200 }, { name:'ForestKing', balance:28900 }, { name:me, balance:state.balance, isMe:true }].sort((a,b) => b.balance - a.balance);
+      }
+      $('modalBody').innerHTML = `<div style="display:flex;flex-direction:column;gap:8px">${rows.map((u,i) => `<div style="display:flex;justify-content:space-between;padding:10px 12px;border-radius:12px;background:${u.isMe ? 'rgba(245,158,11,0.18)' : '#122a1b'};border:1px solid ${u.isMe ? 'rgba(251,191,36,0.6)' : 'rgba(255,255,255,0.1)'}"><span><b class="font-num" style="color:#fcd34d">#${i+1}</b> ${u.name}</span><b class="font-num" style="color:#fde68a">${fmt(u.balance)}</b></div>`).join('')}</div>`;
+    }
+
+    function openFriendsModal() {
+      const t = TEXTS[state.lang], uid = (tg && tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.id) || 'player';
+      const link = 'https://t.me/' + BOT_USERNAME + '?startapp=ref_' + uid;
+      openModal(t.friendsTitle, `<p style="font-size:13px;color:#cbd5e1;margin:0 0 12px">${t.friendsDesc}</p>
+        <div class="font-num" style="background:rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.12);border-radius:10px;padding:10px;font-size:11px;color:#fde68a;overflow:hidden;text-overflow:ellipsis;margin-bottom:12px">${link}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <button class="btn-ghost" onclick="copyInvite('${link}')">${t.copy}</button>
+          <button class="btn-gold" style="background:#059669;color:#fff" onclick="shareInvite('${link}')">${t.share}</button>
+        </div>`);
+    }
+    window.copyInvite = (link) => { navigator.clipboard && navigator.clipboard.writeText(link).catch(() => {}); notify(TEXTS[state.lang].copied); };
+    window.shareInvite = (link) => {
+      if (tg && tg.openTelegramLink) tg.openTelegramLink('https://t.me/share/url?url=' + encodeURIComponent(link) + '&text=' + encodeURIComponent('Forest Fortune 5x5 — +5,000!'));
+      else window.copyInvite(link);
+    };
+
+    function openRulesModal() {
+      const t = TEXTS[state.lang];
+      const items = Object.keys(PAYTABLE).map((sym) => {
+        const [p3, p4, p5] = PAYTABLE[sym];
+        return `<div style="display:flex;align-items:center;justify-content:space-between;background:rgba(0,0,0,0.35);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:6px 10px">
+          <div style="display:flex;align-items:center;gap:8px"><div style="width:32px;height:32px">${getSymbolSVG(sym)}</div><span style="font-size:11px;font-weight:700">${SYM_NAMES[sym][state.lang]}</span></div>
+          <span class="font-num" style="font-size:11px;color:#fcd34d">3:${p3} · 4:${p4} · 5:${p5}</span>
+        </div>`;
+      }).join('');
+      openModal(t.rulesTitle, `<p style="font-size:12px;color:#cbd5e1;margin:0 0 10px">${t.rulesDesc}</p>
+        <div style="background:#122a1b;border:1px solid rgba(251,191,36,0.2);border-radius:12px;padding:10px;font-size:11px;color:#a5f3fc;margin-bottom:12px">${t.wildRule}</div>
+        <div style="display:grid;grid-template-columns:1fr;gap:6px">${items}</div>`, true);
+    }
+
+    async function claimDailyBonus() {
+      sfx.unlock(); const t = TEXTS[state.lang];
+      if (initData) {
+        try {
+          const r = await fetch('/api/daily-bonus', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ initData }) });
+          const d = await r.json();
+          if (d.ok) { state.balance = d.balance; notify(t.dailyOk, 'gold'); spawnConfetti(); sfx.win(); updateUI(); }
+          else notify(d.error || t.dailyWait, 'error');
+          return;
+        } catch {}
+      }
+      const today = new Date().toDateString();
+      if (state.lastDailyDate === today) { notify(t.dailyWait, 'error'); sfx.lose(); return; }
+      state.lastDailyDate = today; state.balance += 100; notify(t.dailyOk, 'gold'); spawnConfetti(); sfx.win(); updateUI();
+    }
+
+    // Bind buttons
+    $('btnEnter').onclick = () => { sfx.unlock(); sfx.click(); $('splash').classList.remove('show'); };
+    $('splash').onclick = (e) => { if (e.target === $('splash')) $('splash').classList.remove('show'); };
+    $('modalClose').onclick = closeModal;
+    $('modalOverlay').onclick = (e) => { if (e.target === $('modalOverlay')) closeModal(); };
+    $('btnContinueBw').onclick = hideBigWin;
+    $('bigWinOverlay').onclick = (e) => { if (e.target === $('bigWinOverlay')) hideBigWin(); };
+    $('btnShareStory').onclick = () => {
+      const botUrl = 'https://t.me/' + BOT_USERNAME;
+      if (tg && tg.openTelegramLink) tg.openTelegramLink('https://t.me/share/url?url=' + encodeURIComponent(botUrl) + '&text=' + encodeURIComponent(lastShareText));
+      else { navigator.clipboard && navigator.clipboard.writeText(lastShareText + ' ' + botUrl).catch(() => {}); notify(TEXTS[state.lang].storyCopied); }
+    };
+
+    $('btnLang').onclick = () => { state.lang = state.lang === 'ru' ? 'en' : 'ru'; sfx.click(); updateUI(); };
+    $('btnSound').onclick = () => { state.soundOn = !state.soundOn; sfx.enabled = state.soundOn; if (state.soundOn) sfx.click(); notify(TEXTS[state.lang][state.soundOn ? 'soundOn' : 'soundOff']); updateUI(); };
+    $('btnTurbo').onclick = () => { state.turbo = !state.turbo; sfx.click(); notify(TEXTS[state.lang][state.turbo ? 'turboOn' : 'turboOff']); updateUI(); };
+    $('btnSpin').onclick = () => {
+      sfx.unlock();
+      if (state.isSpinning) { state.stopReq = true; sfx.click(); return; }
+      if (state.autoSpins > 0) { state.autoSpins = 0; notify(TEXTS[state.lang].autoStopped); updateUI(); return; }
+      runSpinCycle(state.freeSpins > 0);
+    };
+    $('btnAuto').onclick = () => { sfx.click(); openAutoModal(); };
+    $('btnLinesMinus').onclick = () => setLines(state.lines - 1);
+    $('btnLinesPlus').onclick = () => setLines(state.lines + 1);
+    $('btnBetMinus').onclick = () => { if (!state.isSpinning) { state.bet = Math.max(1, state.bet - 1); sfx.click(); updateUI(); } };
+    $('btnBetPlus').onclick = () => { if (!state.isSpinning) { state.bet = Math.min(MAX_BET, state.bet + 1); sfx.click(); updateUI(); } };
+    $('btnMaxBet').onclick = () => { if (!state.isSpinning) { state.bet = Math.min(MAX_BET, Math.max(1, Math.floor(state.balance / state.lines))); sfx.click(); haptic('heavy'); updateUI(); } };
+
+    $('btnWheel').onclick = () => { sfx.click(); openWheelModal(); };
+    $('btnShop').onclick = () => { sfx.click(); openShopModal(); };
+    $('btnRisk').onclick = () => { sfx.click(); openRiskModal(); };
+    $('btnFriends').onclick = () => { sfx.click(); openFriendsModal(); };
+    $('btnTasks').onclick = () => { sfx.click(); openTasksModal(); };
+    $('btnTop').onclick = () => { sfx.click(); openTopModal(); };
+    $('btnBonus').onclick = claimDailyBonus;
+    $('btnRules').onclick = () => { sfx.click(); openRulesModal(); };
+
+    // Init
+    state.grid = generateGrid(generatePool(state.lines * state.bet), []);
+    renderGrid();
+    updateUI();
+
+    if (tg) {
+      try { tg.ready(); tg.expand(); tg.setHeaderColor('#060f09'); tg.setBackgroundColor('#060f09'); } catch {}
+    }
+    if (initData) {
+      fetch('/api/balance', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ initData, startParam: (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) || null })
+      }).then((r) => (r.ok ? r.json() : null)).then((d) => {
+        if (d && typeof d.balance === 'number') { state.balance = d.balance; if (typeof d.jackpot === 'number') state.jackpot = d.jackpot; updateUI(); }
+      }).catch(() => {});
+    }
+    let pct = 0;
+    const spTimer = setInterval(() => {
+      pct = Math.min(100, pct + 20); $('splashBar').style.width = pct + '%';
+      if (pct >= 100) { clearInterval(spTimer); setTimeout(() => $('splash').classList.remove('show'), 350); }
+    }, 110);
+  </script>
+</body>
+</html>
