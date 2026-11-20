@@ -41,6 +41,10 @@ function json(data, status = 200) {
   });
 }
 
+function getBotToken(env) {
+  return String(env.BOT_TOKEN || '').trim();
+}
+
 async function hmacSha256(keyBytes, message) {
   const rawKey = keyBytes instanceof Uint8Array ? keyBytes : new Uint8Array(keyBytes);
   const cryptoKey = await crypto.subtle.importKey(
@@ -88,7 +92,7 @@ async function verifyTelegramInitData(initData, botToken) {
   }
 }
 
-async function callTelegramBotApi(botToken, method, payload) {
+async function callTelegramBotApi(botToken, method, payload = {}) {
   const res = await fetch(`https://api.telegram.org/bot${botToken}/${method}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -99,17 +103,17 @@ async function callTelegramBotApi(botToken, method, payload) {
 
 async function getWebhookSecret(env) {
   if (env.TELEGRAM_WEBHOOK_SECRET) {
-    return env.TELEGRAM_WEBHOOK_SECRET;
+    return String(env.TELEGRAM_WEBHOOK_SECRET).trim();
   }
   const digest = await hmacSha256(
     new TextEncoder().encode('forest-fortune-webhook-secret'),
-    env.BOT_TOKEN
+    getBotToken(env)
   );
   return toHex(digest).slice(0, 32);
 }
 
 function createStore(env) {
-  const kv = env.KV_BINDING || env.KV || null;
+  const kv = env.KV_BINDING || env.KV || env.empire_DB || null;
   const db = env.DB || null;
 
   if (kv) {
@@ -131,6 +135,7 @@ function createStore(env) {
       async getOrCreateUser(userId, displayName, username, startParam) {
         const key = `user:${userId}`;
         let user = await kv.get(key, 'json');
+        let creditedInviterId = null;
 
         if (!user) {
           let inviterId = null;
@@ -161,6 +166,7 @@ function createStore(env) {
               inviter.updated_at = new Date().toISOString();
               await kv.put(invKey, JSON.stringify(inviter));
               await updateLeaderboard(inviterId, inviter.name || `Player_${inviterId.slice(-4)}`, inviter.balance);
+              creditedInviterId = inviterId;
             }
           }
         } else {
@@ -171,7 +177,7 @@ function createStore(env) {
           await updateLeaderboard(userId, displayName, user.balance);
         }
 
-        return user;
+        return { user, creditedInviterId };
       },
 
       async getUser(userId) {
@@ -233,6 +239,7 @@ function createStore(env) {
           .prepare('SELECT id, name, balance, last_daily_date FROM users WHERE id = ?')
           .bind(userId)
           .first();
+        let creditedInviterId = null;
 
         if (!existing) {
           let inviterId = null;
@@ -253,6 +260,7 @@ function createStore(env) {
               .prepare("UPDATE users SET balance = balance + 5000, updated_at = datetime('now') WHERE id = ?")
               .bind(inviterId)
               .run();
+            creditedInviterId = inviterId;
           }
 
           existing = { id: userId, name: displayName, balance: 1000, last_daily_date: '' };
@@ -262,7 +270,7 @@ function createStore(env) {
             .bind(displayName, username, userId)
             .run();
         }
-        return existing;
+        return { user: existing, creditedInviterId };
       },
 
       async getUser(userId) {
@@ -330,6 +338,7 @@ function createStore(env) {
   return {
     async getOrCreateUser(userId, displayName, username, startParam) {
       let user = memUsers.get(userId);
+      let creditedInviterId = null;
       if (!user) {
         user = { id: userId, name: displayName, username, balance: 1000, last_daily_date: '' };
         memUsers.set(userId, user);
@@ -338,13 +347,14 @@ function createStore(env) {
           const inviter = memUsers.get(inviterId);
           if (inviter && inviterId !== userId) {
             inviter.balance += 5000;
+            creditedInviterId = inviterId;
           }
         }
       } else {
         user.name = displayName;
         user.username = username;
       }
-      return user;
+      return { user, creditedInviterId };
     },
     async getUser(userId) {
       return memUsers.get(userId) || null;
@@ -377,15 +387,33 @@ function createStore(env) {
 }
 
 async function handleBalance(request, env, store) {
+  const botToken = getBotToken(env);
   const body = await request.json().catch(() => ({}));
-  const user = await verifyTelegramInitData(body.initData || '', env.BOT_TOKEN);
+  const user = await verifyTelegramInitData(body.initData || '', botToken);
   if (!user) return json({ error: 'Unauthorized' }, 401);
 
   const userId = String(user.id);
   const displayName = user.first_name || user.username || `Player_${userId.slice(-4)}`;
   const username = user.username || '';
 
-  const saved = await store.getOrCreateUser(userId, displayName, username, body.startParam || null);
+  const { user: saved, creditedInviterId } = await store.getOrCreateUser(
+    userId,
+    displayName,
+    username,
+    body.startParam || null
+  );
+
+  if (creditedInviterId && botToken) {
+    try {
+      await callTelegramBotApi(botToken, 'sendMessage', {
+        chat_id: creditedInviterId,
+        text: `🎉 По вашей ссылке присоединился игрок ${displayName}!\nВам начислено +5 000 монет 🪙`,
+      });
+    } catch {
+      // Ignore if inviter blocked the bot
+    }
+  }
+
   const jackpot = await store.getJackpot();
 
   return json({
@@ -395,8 +423,9 @@ async function handleBalance(request, env, store) {
 }
 
 async function handleSpin(request, env, store) {
+  const botToken = getBotToken(env);
   const body = await request.json().catch(() => ({}));
-  const user = await verifyTelegramInitData(body.initData || '', env.BOT_TOKEN);
+  const user = await verifyTelegramInitData(body.initData || '', botToken);
   if (!user) return json({ error: 'Unauthorized' }, 401);
 
   const userId = String(user.id);
@@ -431,8 +460,9 @@ async function handleSpin(request, env, store) {
 }
 
 async function handleDailyBonus(request, env, store) {
+  const botToken = getBotToken(env);
   const body = await request.json().catch(() => ({}));
-  const user = await verifyTelegramInitData(body.initData || '', env.BOT_TOKEN);
+  const user = await verifyTelegramInitData(body.initData || '', botToken);
   if (!user) return json({ error: 'Unauthorized' }, 401);
 
   const userId = String(user.id);
@@ -452,15 +482,16 @@ async function handleDailyBonus(request, env, store) {
 }
 
 async function handleInvoice(request, env) {
+  const botToken = getBotToken(env);
   const body = await request.json().catch(() => ({}));
-  const user = await verifyTelegramInitData(body.initData || '', env.BOT_TOKEN);
+  const user = await verifyTelegramInitData(body.initData || '', botToken);
   if (!user) return json({ error: 'Unauthorized' }, 401);
 
   const pkgId = body.packageId || '';
   const pkg = STAR_PACKAGES[pkgId];
   if (!pkg) return json({ error: 'Unknown package' }, 400);
 
-  const tgRes = await callTelegramBotApi(env.BOT_TOKEN, 'createInvoiceLink', {
+  const tgRes = await callTelegramBotApi(botToken, 'createInvoiceLink', {
     title: pkg.title,
     description: pkg.description,
     payload: JSON.stringify({ uid: String(user.id), pkg: pkgId }),
@@ -482,7 +513,8 @@ async function handleLeaderboard(store) {
 }
 
 async function handleSetup(request, env) {
-  if (!env.BOT_TOKEN) {
+  const botToken = getBotToken(env);
+  if (!botToken) {
     return json({ ok: false, error: 'BOT_TOKEN secret is not configured in Cloudflare' }, 500);
   }
 
@@ -490,14 +522,14 @@ async function handleSetup(request, env) {
   const webhookUrl = `${origin}/api/telegram-webhook`;
   const secretToken = await getWebhookSecret(env);
 
-  const webhookRes = await callTelegramBotApi(env.BOT_TOKEN, 'setWebhook', {
+  const webhookRes = await callTelegramBotApi(botToken, 'setWebhook', {
     url: webhookUrl,
     secret_token: secretToken,
-    allowed_updates: ['message', 'pre_checkout_query'],
+    allowed_updates: ['message', 'pre_checkout_query', 'callback_query'],
     drop_pending_updates: false,
   });
 
-  const menuRes = await callTelegramBotApi(env.BOT_TOKEN, 'setChatMenuButton', {
+  const menuRes = await callTelegramBotApi(botToken, 'setChatMenuButton', {
     menu_button: {
       type: 'web_app',
       text: '🎰 Играть',
@@ -505,17 +537,52 @@ async function handleSetup(request, env) {
     },
   });
 
+  const cmdRes = await callTelegramBotApi(botToken, 'setMyCommands', {
+    commands: [
+      { command: 'start', description: '🎰 Запустить Forest Fortune' },
+      { command: 'top', description: '🏆 Таблица лидеров' },
+    ],
+  });
+
+  const infoRes = await callTelegramBotApi(botToken, 'getWebhookInfo');
+
   return json({
     ok: Boolean(webhookRes.ok && menuRes.ok),
     webhookUrl,
     webhook: Boolean(webhookRes.ok),
     menuButton: Boolean(menuRes.ok),
+    commands: Boolean(cmdRes.ok),
+    pendingUpdates: infoRes.result ? infoRes.result.pending_update_count : null,
+    lastError: infoRes.result ? infoRes.result.last_error_message || null : null,
     description: webhookRes.description || menuRes.description || null,
   });
 }
 
+async function sendTopLeaderboard(botToken, chatId, appUrl, store) {
+  const list = await store.getLeaderboard();
+  const medals = ['🥇', '🥈', '🥉'];
+  const lines = list.slice(0, 10).map((item, idx) => {
+    const prefix = medals[idx] || `${idx + 1}.`;
+    return `${prefix} ${item.name || 'Player'} — ${Number(item.balance || 0).toLocaleString('ru-RU')} 🪙`;
+  });
+
+  const text = lines.length
+    ? `🏆 <b>ТОП-10 игроков Forest Fortune 5x5</b>\n\n${lines.join('\n')}`
+    : '🏆 Пока в таблице лидеров никого нет. Стань первым!';
+
+  await callTelegramBotApi(botToken, 'sendMessage', {
+    chat_id: chatId,
+    text,
+    parse_mode: 'HTML',
+    reply_markup: {
+      inline_keyboard: [[{ text: '🎰 Играть сейчас', web_app: { url: appUrl } }]],
+    },
+  });
+}
+
 async function handleWebhook(request, env, store) {
-  if (env.BOT_TOKEN) {
+  const botToken = getBotToken(env);
+  if (botToken) {
     const expectedSecret = await getWebhookSecret(env);
     const secretHeader = request.headers.get('X-Telegram-Bot-Api-Secret-Token');
     if (secretHeader !== expectedSecret) {
@@ -524,6 +591,7 @@ async function handleWebhook(request, env, store) {
   }
 
   const update = await request.json().catch(() => ({}));
+  const origin = (env.WEBAPP_URL || new URL(request.url).origin).replace(/\/$/, '');
 
   if (update.pre_checkout_query) {
     const q = update.pre_checkout_query;
@@ -536,11 +604,22 @@ async function handleWebhook(request, env, store) {
       valid = false;
     }
 
-    await callTelegramBotApi(env.BOT_TOKEN, 'answerPreCheckoutQuery', {
+    await callTelegramBotApi(botToken, 'answerPreCheckoutQuery', {
       pre_checkout_query_id: q.id,
       ok: valid,
       ...(valid ? {} : { error_message: 'Пакет не найден или сумма не совпадает.' }),
     });
+    return json({ ok: true });
+  }
+
+  if (update.callback_query) {
+    const cq = update.callback_query;
+    await callTelegramBotApi(botToken, 'answerCallbackQuery', {
+      callback_query_id: cq.id,
+    });
+    if (cq.data === 'leaderboard' && cq.message && cq.message.chat && cq.message.chat.id) {
+      await sendTopLeaderboard(botToken, cq.message.chat.id, origin, store);
+    }
     return json({ ok: true });
   }
 
@@ -562,7 +641,7 @@ async function handleWebhook(request, env, store) {
             pkg.coins
           );
 
-          await callTelegramBotApi(env.BOT_TOKEN, 'sendMessage', {
+          await callTelegramBotApi(botToken, 'sendMessage', {
             chat_id: update.message.chat.id,
             text: `✅ Оплата прошла успешно! На ваш баланс начислено +${pkg.coins.toLocaleString('ru-RU')} монет 🪙`,
           });
@@ -575,26 +654,31 @@ async function handleWebhook(request, env, store) {
   }
 
   const msg = update.message;
-  if (msg && msg.chat && msg.chat.id && msg.text && msg.text.startsWith('/start')) {
-    const origin = (env.WEBAPP_URL || new URL(request.url).origin).replace(/\/$/, '');
-    const parts = msg.text.trim().split(/\s+/);
-    const startParam = parts[1] || '';
-    const appUrl = startParam ? `${origin}?startapp=${encodeURIComponent(startParam)}` : origin;
+  if (msg && msg.chat && msg.chat.id && msg.text) {
+    const text = msg.text.trim();
+    if (text.startsWith('/start')) {
+      const parts = text.split(/\s+/);
+      const startParam = parts[1] || '';
+      const appUrl = startParam ? `${origin}?startapp=${encodeURIComponent(startParam)}` : origin;
+      const firstName = (msg.from && msg.from.first_name) ? `, ${msg.from.first_name}` : '';
 
-    await callTelegramBotApi(env.BOT_TOKEN, 'sendMessage', {
-      chat_id: msg.chat.id,
-      text: '🌲 Добро пожаловать в Forest Fortune 5x5 — Las Vegas Edition!\nКрути барабаны, лови каскады, Колесо Фортуны и джекпот 🏆',
-      reply_markup: {
-        inline_keyboard: [
-          [
-            {
-              text: '🎰 Играть в Forest Fortune',
-              web_app: { url: appUrl },
-            },
+      await callTelegramBotApi(botToken, 'sendMessage', {
+        chat_id: msg.chat.id,
+        text:
+          `🌲 <b>Добро пожаловать в Forest Fortune 5x5${firstName}!</b>\n\n` +
+          `🎰 21 линия выплат, каскадные победы, Sticky Wilds, Колесо Фортуны и прогрессивный джекпот ждут тебя.\n` +
+          `🎁 Забирай ежедневный бонус, выполняй задания и приглашай друзей (+5 000 🪙 за каждого)!`,
+        parse_mode: 'HTML',
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🎰 Играть / Play Now', web_app: { url: appUrl } }],
+            [{ text: '🏆 Топ игроков', callback_data: 'leaderboard' }],
           ],
-        ],
-      },
-    });
+        },
+      });
+    } else if (text.startsWith('/top')) {
+      await sendTopLeaderboard(botToken, msg.chat.id, origin, store);
+    }
   }
 
   return json({ ok: true });
