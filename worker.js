@@ -56,6 +56,13 @@ const STAR_PACKAGES = {
   p100000: { coins: 5000000, stars: 100000, title: '5 000 000 Монет · Король Вегаса' }
 };
 
+const mem = {
+  jackpot: null,
+  jackpotSavedAt: 0,
+  leaderboard: null,
+  lbSavedAt: 0
+};
+
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
@@ -132,6 +139,13 @@ async function getWebhookSecret(env) {
   return toHex(sig).slice(0, 32);
 }
 
+async function getAdminKey(env) {
+  if (env.ADMIN_KEY) return env.ADMIN_KEY;
+  if (!env.BOT_TOKEN) return '';
+  const sig = await hmacSha256(new TextEncoder().encode('forest-fortune-stats-v1'), env.BOT_TOKEN);
+  return toHex(sig).slice(0, 24);
+}
+
 async function tgApi(botToken, method, payload) {
   const res = await fetch(`https://api.telegram.org/bot${botToken}/${method}`, {
     method: 'POST',
@@ -139,6 +153,31 @@ async function tgApi(botToken, method, payload) {
     body: JSON.stringify(payload)
   });
   return res.json();
+}
+
+async function getJackpot(kv) {
+  if (mem.jackpot === null) {
+    mem.jackpot = Number((await kv.get('meta:jackpot')) || 500000);
+    mem.jackpotSavedAt = Date.now();
+  }
+  return mem.jackpot;
+}
+
+async function saveJackpot(kv, val, force = false) {
+  mem.jackpot = val;
+  const now = Date.now();
+  if (force || now - mem.jackpotSavedAt >= 60000) {
+    mem.jackpotSavedAt = now;
+    await kv.put('meta:jackpot', String(val));
+  }
+}
+
+async function getLeaderboard(kv) {
+  if (!mem.leaderboard) {
+    mem.leaderboard = (await kv.get('meta:leaderboard', 'json')) || [];
+    mem.lbSavedAt = Date.now();
+  }
+  return mem.leaderboard;
 }
 
 function defaultUser(uid, name, username) {
@@ -160,6 +199,7 @@ function defaultUser(uid, name, username) {
     starsSpent: 0,
     walletBeta: '',
     risk: null,
+    lastSeenAt: new Date().toISOString(),
     tasks: {
       spins: 0, wins: 0, wheel: 0,
       spinsDone: false, winsDone: false, wheelDone: false,
@@ -171,23 +211,32 @@ function defaultUser(uid, name, username) {
 
 async function loadUser(kv, uid, name, username) {
   const raw = await kv.get(`u:${uid}`, 'json');
-  if (!raw) return { user: defaultUser(uid, name, username), isNew: true };
+  if (!raw) return { user: defaultUser(uid, name, username), isNew: true, profileChanged: true };
   const def = defaultUser(uid, name, username);
   const user = { ...def, ...raw, tasks: { ...def.tasks, ...(raw.tasks || {}) } };
-  if (name) user.name = name;
-  if (username !== undefined) user.username = username;
-  return { user, isNew: false };
+  let profileChanged = false;
+  if (name && raw.name !== name) { user.name = name; profileChanged = true; }
+  if (username !== undefined && raw.username !== username) { user.username = username; profileChanged = true; }
+  return { user, isNew: false, profileChanged };
 }
 
-async function saveUser(kv, u) {
+async function saveUser(kv, u, forceLeaderboard = false) {
+  u.lastSeenAt = new Date().toISOString();
   await kv.put(`u:${u.uid}`, JSON.stringify(u));
-  const top = (await kv.get('meta:leaderboard', 'json')) || [];
+
+  const top = await getLeaderboard(kv);
   const idx = top.findIndex((x) => x.uid === u.uid);
   const entry = { uid: u.uid, name: u.name || 'Player', balance: u.balance };
   if (idx >= 0) top[idx] = entry;
   else top.push(entry);
   top.sort((a, b) => b.balance - a.balance);
-  await kv.put('meta:leaderboard', JSON.stringify(top.slice(0, 25)));
+  mem.leaderboard = top.slice(0, 25);
+
+  const now = Date.now();
+  if (forceLeaderboard || now - mem.lbSavedAt >= 60000) {
+    mem.lbSavedAt = now;
+    await kv.put('meta:leaderboard', JSON.stringify(mem.leaderboard));
+  }
 }
 
 function serializeClientState(u, jackpot) {
@@ -274,29 +323,32 @@ async function handleBalance(request, env, kv) {
 
   const uid = String(tgUser.id);
   const name = tgUser.first_name || tgUser.username || `Player_${uid.slice(-4)}`;
-  const { user: u, isNew } = await loadUser(kv, uid, name, tgUser.username || '');
+  const { user: u, isNew, profileChanged } = await loadUser(kv, uid, name, tgUser.username || '');
 
+  let dirty = isNew || profileChanged;
   const today = todayUtc();
   if (u.lastWheelDate !== today) {
     u.wheelSpins = Math.max(1, u.wheelSpins);
     u.lastWheelDate = today;
+    dirty = true;
   }
 
   if (isNew && typeof body.startParam === 'string' && body.startParam.startsWith('ref_')) {
     const inviterId = body.startParam.slice(4).trim();
     if (inviterId && inviterId !== uid && !u.referredBy) {
       u.referredBy = inviterId;
+      dirty = true;
       const inv = await kv.get(`u:${inviterId}`, 'json');
       if (inv) {
         inv.balance = (inv.balance || 0) + 5000;
         inv.referralsCount = (inv.referralsCount || 0) + 1;
-        await saveUser(kv, inv);
+        await saveUser(kv, inv, true);
       }
     }
   }
 
-  await saveUser(kv, u);
-  const jackpot = Number((await kv.get('meta:jackpot')) || 500000);
+  if (dirty) await saveUser(kv, u, isNew);
+  const jackpot = await getJackpot(kv);
   return json({ ok: true, ...serializeClientState(u, jackpot) });
 }
 
@@ -317,7 +369,7 @@ async function handleSpin(request, env, kv) {
     return json({ ok: false, error: 'Недостаточно монет' }, 400);
   }
 
-  let jackpot = Number((await kv.get('meta:jackpot')) || 500000);
+  let jackpot = await getJackpot(kv);
   if (isFreeSpin) {
     u.freeSpins -= 1;
   } else {
@@ -384,8 +436,8 @@ async function handleSpin(request, env, kv) {
   u.tasks.spins += 1;
   if (totalWin > 0) u.tasks.wins += 1;
 
-  await kv.put('meta:jackpot', String(jackpot));
-  await saveUser(kv, u);
+  await saveJackpot(kv, jackpot, jackpotWon);
+  await saveUser(kv, u, jackpotWon);
 
   return json({
     ok: true,
@@ -434,7 +486,7 @@ async function handleWheel(request, env, kv) {
   }
 
   await saveUser(kv, u);
-  const jackpot = Number((await kv.get('meta:jackpot')) || 500000);
+  const jackpot = await getJackpot(kv);
   return json({ ok: true, prizeIndex, winAmount, ...serializeClientState(u, jackpot) });
 }
 
@@ -444,7 +496,7 @@ async function handleRisk(request, env, kv) {
   if (!tgUser) return json({ ok: false, error: 'Unauthorized' }, 401);
 
   const { user: u } = await loadUser(kv, String(tgUser.id));
-  const jackpot = Number((await kv.get('meta:jackpot')) || 500000);
+  const jackpot = await getJackpot(kv);
 
   if (body.action === 'deal') {
     if (u.risk && u.risk.active) {
@@ -513,7 +565,7 @@ async function handleDailyBonus(request, env, kv) {
   }
 
   await saveUser(kv, u);
-  const jackpot = Number((await kv.get('meta:jackpot')) || 500000);
+  const jackpot = await getJackpot(kv);
   return json({ ok: true, ...serializeClientState(u, jackpot) });
 }
 
@@ -523,7 +575,7 @@ async function handleTaskClaim(request, env, kv) {
   if (!tgUser) return json({ ok: false, error: 'Unauthorized' }, 401);
 
   const { user: u } = await loadUser(kv, String(tgUser.id));
-  const jackpot = Number((await kv.get('meta:jackpot')) || 500000);
+  const jackpot = await getJackpot(kv);
   const taskId = String(body.taskId || '');
   const action = body.action === 'mark' ? 'mark' : 'claim';
 
@@ -606,7 +658,7 @@ async function handleProfile(request, env, kv) {
     u.walletBeta = '';
   }
   await saveUser(kv, u);
-  const jackpot = Number((await kv.get('meta:jackpot')) || 500000);
+  const jackpot = await getJackpot(kv);
   return json({ ok: true, ...serializeClientState(u, jackpot) });
 }
 
@@ -615,6 +667,7 @@ async function handleSetup(request, env) {
   const origin = (env.WEBAPP_URL || new URL(request.url).origin).replace(/\/$/, '');
   const webhookUrl = `${origin}/api/telegram-webhook`;
   const secretToken = await getWebhookSecret(env);
+  const adminKey = await getAdminKey(env);
 
   const wh = await tgApi(env.BOT_TOKEN, 'setWebhook', {
     url: webhookUrl,
@@ -629,7 +682,13 @@ async function handleSetup(request, env) {
     commands: [{ command: 'start', description: '🎰 Открыть Forest Fortune 5x5' }]
   });
 
-  return json({ ok: Boolean(wh.ok && menu.ok), webhookUrl, wh, menu });
+  return json({
+    ok: Boolean(wh.ok && menu.ok),
+    webhookUrl,
+    statsUrl: `${origin}/api/stats?key=${adminKey}`,
+    wh,
+    menu
+  });
 }
 
 async function handleWebhook(request, env, kv) {
@@ -670,7 +729,7 @@ async function handleWebhook(request, env, kv) {
         const { user: u } = await loadUser(kv, uid, upd.message.from && upd.message.from.first_name);
         u.balance += pkg.coins;
         u.starsSpent += pkg.stars;
-        await saveUser(kv, u);
+        await saveUser(kv, u, true);
         await tgApi(env.BOT_TOKEN, 'sendMessage', {
           chat_id: upd.message.chat.id,
           text: `✅ Оплата Stars прошла! Начислено +${pkg.coins.toLocaleString('ru-RU')} 🪙`
@@ -698,6 +757,70 @@ async function handleWebhook(request, env, kv) {
   return json({ ok: true });
 }
 
+function esc(s) {
+  return String(s || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+async function handleStats(env, kv, url) {
+  const expected = await getAdminKey(env);
+  if (!expected || url.searchParams.get('key') !== expected) {
+    return json({ ok: false, error: 'Forbidden' }, 403);
+  }
+
+  const list = await kv.list({ prefix: 'u:', limit: 100 });
+  const players = (await Promise.all(list.keys.map((k) => kv.get(k.name, 'json')))).filter(Boolean);
+  players.sort((a, b) => (b.tasks?.spins || 0) - (a.tasks?.spins || 0));
+
+  let totalSpins = 0;
+  let totalStars = 0;
+  for (const p of players) {
+    totalSpins += p.tasks?.spins || 0;
+    totalStars += p.starsSpent || 0;
+  }
+  const jackpot = await getJackpot(kv);
+
+  const rows = players.map((p) => {
+    const tag = p.username ? `@${esc(p.username)}` : '—';
+    const seen = (p.lastSeenAt || p.lastWheelDate || '—').replace('T', ' ').slice(0, 16);
+    const t = p.tasks || {};
+    return `<tr>
+      <td><b>${esc(p.name)}</b><br><span class="mut">${tag} · ${esc(p.uid)}</span></td>
+      <td>${Number(p.balance || 0).toLocaleString('ru-RU')}</td>
+      <td>${t.spins || 0} / ${t.wins || 0} / 🎡${t.wheel || 0}</td>
+      <td>${p.starsSpent || 0}⭐ · FS:${p.freeSpins || 0}</td>
+      <td>${esc(seen)}</td>
+    </tr>`;
+  }).join('');
+
+  const html = `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Forest Fortune · Статистика</title>
+  <style>
+    body{margin:0;padding:12px;background:#07140d;color:#eefaf1;font-family:-apple-system,system-ui,sans-serif;font-size:13px}
+    h1{font-size:17px;margin:0 0 10px;color:#facc15}
+    .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:12px}
+    .card{background:#0d2217;border:1px solid #1f4b33;border-radius:10px;padding:9px}
+    .lbl{font-size:11px;color:#8eb89d}.val{font-size:17px;font-weight:700;margin-top:2px}
+    .wrap{overflow-x:auto;border-radius:10px}
+    table{width:100%;border-collapse:collapse;background:#0d2217}
+    th,td{padding:8px 6px;border-bottom:1px solid #183a27;text-align:left;vertical-align:top;font-size:12px}
+    th{background:#112c1d;color:#facc15}
+    .mut{color:#8eb89d;font-size:11px}
+  </style></head><body>
+  <h1>🎰 Forest Fortune · Игроки (${players.length})</h1>
+  <div class="grid">
+    <div class="card"><div class="lbl">Всего игроков</div><div class="val">${players.length}</div></div>
+    <div class="card"><div class="lbl">Всего спинов</div><div class="val">${totalSpins.toLocaleString('ru-RU')}</div></div>
+    <div class="card"><div class="lbl">Stars</div><div class="val">${totalStars} ⭐</div></div>
+    <div class="card"><div class="lbl">Джекпот</div><div class="val">${jackpot.toLocaleString('ru-RU')}</div></div>
+  </div>
+  <div class="wrap"><table>
+    <thead><tr><th>Игрок</th><th>Баланс</th><th>Спины/Победы/Колесо</th><th>Stars/FS</th><th>Активность</th></tr></thead>
+    <tbody>${rows || '<tr><td colspan="5">Пока пусто</td></tr>'}</tbody>
+  </table></div></body></html>`;
+
+  return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
+}
+
 export default {
   async fetch(request, env) {
     if (request.method === 'OPTIONS') return json({ ok: true });
@@ -714,8 +837,10 @@ export default {
       if (url.pathname === '/api/invoice' && request.method === 'POST') return await handleInvoice(request, env);
       if (url.pathname === '/api/profile' && request.method === 'POST') return await handleProfile(request, env, kv);
       if (url.pathname === '/api/leaderboard' && request.method === 'GET') {
-        const top = (await kv.get('meta:leaderboard', 'json')) || [];
-        return json(top);
+        return json(await getLeaderboard(kv));
+      }
+      if (url.pathname === '/api/stats' && request.method === 'GET') {
+        return await handleStats(env, kv, url);
       }
       if (url.pathname === '/api/setup' && (request.method === 'GET' || request.method === 'POST')) {
         return await handleSetup(request, env);
